@@ -102,10 +102,6 @@ pub(crate) trait Comparator {
         -> crate::rules::Result<EvalResult>;
 }
 
-pub(crate) trait UnaryComparator {
-    fn compare(&self, lhs: &[QueryResult]) -> crate::rules::Result<EvalResult>;
-}
-
 struct CommonOperator {
     comparator: fn(&PathAwareValue, &PathAwareValue) -> crate::rules::Result<bool>,
 }
