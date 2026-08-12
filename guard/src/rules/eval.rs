@@ -1099,7 +1099,19 @@ fn binary_operation<'value, 'loc: 'value>(
                         // that case; removing it changed no measured behaviour on any
                         // fixture, so it was dropped rather than kept as a
                         // plausible-looking safeguard.
-                        if role.is_strict() && !cmp.1 {
+                        // `Unevaluatable.blocks(role)` rather than `role.is_strict()`.
+                        // Equivalent by construction -- `to_status` maps Unevaluatable to
+                        // FAIL for an assertion and SKIP for a gate -- but it states the
+                        // premise: this value is an unevaluatable clause, and the question
+                        // is whether an unevaluatable clause blocks in this role.
+                        //
+                        // `blocks`, not `closes_gate`: here the clause is being reported,
+                        // and a FAIL is what blocks a deployment. `closes_gate` answers a
+                        // different question -- whether a condition silences the block it
+                        // guards -- and the gate branch below deliberately does not fail.
+                        if crate::rules::eval::outcome::Outcome::Unevaluatable.blocks(role)
+                            && !cmp.1
+                        {
                             eval_context.start_record(&context)?;
                             eval_context.end_record(
                                 &context,
@@ -1118,7 +1130,7 @@ fn binary_operation<'value, 'loc: 'value>(
                                 )),
                             )?;
                             statues.push((QueryResult::Resolved(value), Status::FAIL));
-                        } else if role.is_strict() {
+                        } else if crate::rules::eval::outcome::Outcome::Unevaluatable.blocks(role) {
                             // A negated assertion over nothing. Vacuously true, but not
                             // evidence of anything, so it must not satisfy a disjunction.
                             //
@@ -1949,7 +1961,15 @@ fn eval_when_condition_block<'value, 'loc: 'value>(
     resolver.start_record(&when_context)?;
     let block = match eval_conjunction_clauses(conditions, resolver, eval_when_clause) {
         Ok(status) => {
-            if status != Status::PASS {
+            // `closes_gate`, not `status != PASS`. Identical in behaviour --
+            // `from_status` maps PASS to Satisfied and both FAIL and SKIP to variants
+            // that close -- but it names the decision. This is the branch that makes a
+            // rule inapplicable and drops every check in its body, so "did the gate
+            // close" is the question being asked, and it is deliberately not
+            // `Outcome::blocks`: a gate that closes blocks nothing and still silences
+            // everything it guarded, which is the hazard the two predicates exist to
+            // keep apart.
+            if crate::rules::eval::outcome::Outcome::from_status(status).closes_gate() {
                 resolver.end_record(&when_context, RecordType::WhenCondition(status))?;
                 resolver.end_record(
                     &context,
@@ -2287,7 +2307,15 @@ pub(in crate::rules) fn eval_type_block_clause<'value, 'loc: 'value>(
         resolver.start_record(&when_context)?;
         match eval_conjunction_clauses(conditions, resolver, eval_when_clause) {
             Ok(status) => {
-                if status != Status::PASS {
+                // `closes_gate`, not `status != PASS`. Identical in behaviour --
+                // `from_status` maps PASS to Satisfied and both FAIL and SKIP to variants
+                // that close -- but it names the decision. This is the branch that makes a
+                // rule inapplicable and drops every check in its body, so "did the gate
+                // close" is the question being asked, and it is deliberately not
+                // `Outcome::blocks`: a gate that closes blocks nothing and still silences
+                // everything it guarded, which is the hazard the two predicates exist to
+                // keep apart.
+                if crate::rules::eval::outcome::Outcome::from_status(status).closes_gate() {
                     resolver.end_record(&when_context, RecordType::TypeCondition(status))?;
                     resolver.end_record(
                         &context,
@@ -2491,7 +2519,15 @@ pub(in crate::rules) fn eval_rule<'value, 'loc: 'value>(
         resolver.start_record(&when_context)?;
         match eval_conjunction_clauses(conditions, resolver, eval_when_clause) {
             Ok(status) => {
-                if status != Status::PASS {
+                // `closes_gate`, not `status != PASS`. Identical in behaviour --
+                // `from_status` maps PASS to Satisfied and both FAIL and SKIP to variants
+                // that close -- but it names the decision. This is the branch that makes a
+                // rule inapplicable and drops every check in its body, so "did the gate
+                // close" is the question being asked, and it is deliberately not
+                // `Outcome::blocks`: a gate that closes blocks nothing and still silences
+                // everything it guarded, which is the hazard the two predicates exist to
+                // keep apart.
+                if crate::rules::eval::outcome::Outcome::from_status(status).closes_gate() {
                     resolver.end_record(&when_context, RecordType::RuleCondition(status))?;
                     resolver.end_record(
                         &context,
