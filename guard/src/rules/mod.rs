@@ -378,7 +378,6 @@ pub(crate) trait EvalContext<'value, 'loc: 'value>: RecordTracer<'value> {
     }
 }
 
-
 pub fn short_form_to_long(fn_ref: &str) -> &'static str {
     match SHORT_FORM_TO_LONG_MAPPING.get(fn_ref) {
         Some(fn_ref) => fn_ref,
