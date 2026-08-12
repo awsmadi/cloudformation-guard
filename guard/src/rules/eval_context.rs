@@ -883,7 +883,10 @@ fn query_retrieval_with_converter<'value, 'loc: 'value>(
 
                 for each_result in results {
                     match each_result {
-                        (QueryResult::Resolved(key), Status::PASS) => {
+                        // Matches on Outcome now: the per-value vector carries why each
+                        // value reached its answer, and a map-key filter selects on the
+                        // ones that actually satisfied the predicate.
+                        (QueryResult::Resolved(key), super::eval::Outcome::Satisfied) => {
                             if let PathAwareValue::String((_, key_name)) = &*key {
                                 selected.push(QueryResult::Resolved(Rc::new(
                                     map.values.get(key_name.as_str()).unwrap().clone(),
