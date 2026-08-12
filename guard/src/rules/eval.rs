@@ -1118,6 +1118,44 @@ fn binary_operation<'value, 'loc: 'value>(
                                 )),
                             )?;
                             statues.push((QueryResult::Resolved(value), Status::FAIL));
+                        } else if role.is_strict() {
+                            // A negated assertion over nothing. Vacuously true, but not
+                            // evidence of anything, so it must not satisfy a disjunction.
+                            //
+                            // This used to push nothing at all, which is exactly what let the
+                            // vacuous disjunct absorb an `or`: an empty `statues` reached the
+                            // fold indistinguishable from "everything passed". The fold now
+                            // reads this SKIP as `Outcome::NotApplicable`, which does not
+                            // absorb under `or`, so the sibling disjuncts still run.
+                            //
+                            // No record is emitted deliberately. The entry carries the fold,
+                            // but reporting a clause the author negated over an empty
+                            // collection as a finding would be noise -- nothing is wrong with
+                            // the template.
+                            statues.push((QueryResult::Resolved(value), Status::SKIP));
+                        } else {
+                            // A gate. The vacuous PASS here is load-bearing and cannot be
+                            // replaced with SKIP, which is what sank the two earlier attempts
+                            // at this fix and a third one made while writing this arm.
+                            //
+                            // `eval_rule` treats any non-PASS condition as "this rule does not
+                            // apply" and drops every check in the guarded block. So a gate
+                            // whose condition has nothing to compare has to report PASS and
+                            // leave the block to its other conditions; returning SKIP closes
+                            // the gate quietly and trades one unenforced clause for a whole
+                            // disarmed body, while still exiting 0.
+                            //
+                            // Measured, not reasoned: pushing SKIP here fails
+                            // `a_vacuous_negated_gate_still_opens_and_runs_its_body`,
+                            // `an_empty_collection_in_a_when_condition_does_not_disarm_the_guarded_block`,
+                            // `an_empty_collection_in_an_ordering_gate_does_not_disarm_the_block`,
+                            // `a_mirrored_empty_collection_in_a_when_condition_does_not_disarm_the_block`
+                            // and `a_vacuous_negation_nested_in_a_when_block_still_runs_the_inner_body`.
+                            //
+                            // That SKIP does not open a gate either is a real design wart,
+                            // recorded on `Outcome::closes_gate`. It is pre-existing for every
+                            // non-PASS condition and is not made worse here.
+                            statues.push((QueryResult::Resolved(value), Status::PASS));
                         }
                         // A negated comparison contributes nothing, and that is a known
                         // defect rather than a decision. Read on before "fixing" it.
@@ -1607,31 +1645,43 @@ pub(in crate::rules) fn eval_guard_access_clause<'value, 'loc: 'value>(
                 Ok(status)
             }
             EvaluationResult::QueryValueResult(result) => {
-                let outcome = loop {
-                    let mut fails = 0;
-                    let mut pass = 0;
-                    for (_value, status) in result {
-                        match status {
-                            Status::PASS => {
-                                pass += 1;
-                            }
-                            Status::FAIL => {
-                                fails += 1;
-                            }
-                            Status::SKIP => unreachable!(),
-                        }
-                    }
-                    if all {
-                        if fails > 0 {
-                            break Status::FAIL;
-                        }
-                        break Status::PASS;
+                // Folded through `Outcome` rather than by counting passes and fails.
+                //
+                // The counting version could not represent a third answer. It matched
+                // `Status::SKIP => unreachable!()`, so a clause that was neither satisfied
+                // nor violated -- a negated comparison with nothing to compare -- had no way
+                // to say so and had to contribute no entry at all. Contributing nothing is
+                // not neutral here: with `match_all` the fold then saw `fails == 0` and
+                // returned PASS, and PASS short-circuits `eval_conjunction_clauses`, so
+                //
+                //     Tags != 'Owner'  or  Name == 'safebucket'
+                //
+                // reported a violating template as compliant -- the vacuous first disjunct
+                // satisfied the whole `or` and the real check never ran.
+                //
+                // `Outcome::all`/`Outcome::any` fix that structurally rather than by adding
+                // another counter. They fold from `Outcome::identity()`, which is
+                // `NotApplicable`, so a fold over zero elements returns "did not apply"
+                // instead of "satisfied" -- the rule `outcome.rs` states as the one that
+                // closes the empty-input defects. And only `Satisfied` absorbs under `or`, so
+                // an inapplicable disjunct cannot stand in for one that passed.
+                //
+                // `from_status` is lossy in the direction that matters least here: it maps
+                // SKIP to `NotApplicable`, discarding *why* it was skipped. The entries being
+                // lifted are per-value PASS/FAIL/SKIP produced a few lines above, where SKIP
+                // only ever means "nothing to compare", so the collapse is faithful for this
+                // call site. Producing `Outcome` directly from the comparators is the next
+                // step, not this one.
+                let outcome = {
+                    let lifted = result.into_iter().map(|(_value, status)| {
+                        crate::rules::eval::outcome::Outcome::from_status(status)
+                    });
+                    let folded = if all {
+                        crate::rules::eval::outcome::Outcome::all(lifted)
                     } else {
-                        if pass > 0 {
-                            break Status::PASS;
-                        }
-                        break Status::FAIL;
-                    }
+                        crate::rules::eval::outcome::Outcome::any(lifted)
+                    };
+                    folded.to_status(role)
                 };
                 resolver.end_record(
                     &blk_context,
