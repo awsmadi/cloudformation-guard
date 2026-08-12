@@ -2567,7 +2567,29 @@ where
     Ok(loop {
         let mut num_passes = 0;
         let mut num_fails = 0;
-        let context = format!("{}#disjunction", std::any::type_name::<T>());
+        // `std::any::type_name` is the source of a user-visible string here: `context`
+        // becomes the `Context=` label on the Disjunction node in `--verbose` output, and
+        // four fixtures under `guard/resources` pin it exactly.
+        //
+        // Its output is explicitly unspecified -- std documents that it "must not be
+        // considered to uniquely identify a type" and may change between compiler versions,
+        // and it did. Newer rustc renders the elided lifetime, so
+        // `cfn_guard::rules::exprs::GuardClause` became `...::GuardClause<'_>` and both
+        // `*_verbose` fixture tests fail on any toolchain other than the 1.77.2 pinned in
+        // rust-toolchain.toml. That made cfn-guard's own output depend on which compiler
+        // built it.
+        //
+        // Truncating at the first `<` restores the pre-change spelling for every `T` and is
+        // stable under further rendering changes, since only the generic/lifetime portion
+        // varies. The deeper problem -- that a Rust module path is user-facing output at all,
+        // which no rule author can act on -- is left alone deliberately: changing these
+        // strings is a visible output change and belongs with the fixtures, not in a fix for
+        // a build-environment-dependent failure.
+        let type_name = std::any::type_name::<T>();
+        let type_name = type_name
+            .split_once('<')
+            .map_or(type_name, |(bare, _generics)| bare);
+        let context = format!("{}#disjunction", type_name);
         'conjunction: for conjunction in conjunctions {
             let mut num_of_disjunction_fails = 0;
             let multiple_ors_present = conjunction.len() > 1;
