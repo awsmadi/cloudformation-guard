@@ -506,26 +506,41 @@ fn unary_operation<'r, 'l: 'r, 'loc: 'l>(
     Ok(EvaluationResult::QueryValueResult(status))
 }
 
-enum ComparisonResult {
+/// One left-hand value compared against one right-hand value, staged for reporting.
+///
+/// Distinct from [`operators::ComparisonResult`], which it was called `ComparisonResult` to
+/// match until this rename. Two types with one name in a parent module and its child is a
+/// reading hazard rather than a convenience: `each_lhs_compare` builds these and hands them
+/// to `report_value`, while the comparators in `operators.rs` build the other kind, and the
+/// only way to tell which a given `ComparisonResult` meant was to check whether the mention
+/// carried an `operators::` prefix.
+///
+/// The two are not interchangeable. This one pairs resolved values and records whether the
+/// comparison held as a plain `bool`; the operators one carries the verdict in its
+/// `Success`/`Fail` constructor together with the evidence payload the reporter needs.
+enum RhsComparison {
     Comparable(ComparisonWithRhs),
     NotComparable(NotComparableWithRhs),
     UnResolvedRhs(UnResolvedRhs),
 }
 
-struct LhsRhsPair {
+/// The two values a [`RhsComparison`] compared.
+///
+/// Renamed from `LhsRhsPair`, which [`operators::LhsRhsPair`] also uses.
+struct ComparedPair {
     lhs: Rc<PathAwareValue>,
     rhs: Rc<PathAwareValue>,
 }
 
 struct ComparisonWithRhs {
     outcome: bool,
-    pair: LhsRhsPair,
+    pair: ComparedPair,
 }
 
 #[allow(dead_code)]
 struct NotComparableWithRhs {
     reason: String,
-    pair: LhsRhsPair,
+    pair: ComparedPair,
 }
 
 struct UnResolvedRhs {
@@ -537,7 +552,7 @@ fn each_lhs_compare<C>(
     cmp: C,
     lhs: Rc<PathAwareValue>,
     rhs: &[QueryResult],
-) -> Result<Vec<ComparisonResult>>
+) -> Result<Vec<RhsComparison>>
 where
     C: Fn(&PathAwareValue, &PathAwareValue) -> Result<bool>,
 {
@@ -547,9 +562,9 @@ where
             QueryResult::Literal(each_rhs_resolved) | QueryResult::Resolved(each_rhs_resolved) => {
                 match cmp(&lhs, each_rhs_resolved) {
                     Ok(outcome) => {
-                        statues.push(ComparisonResult::Comparable(ComparisonWithRhs {
+                        statues.push(RhsComparison::Comparable(ComparisonWithRhs {
                             outcome,
-                            pair: LhsRhsPair {
+                            pair: ComparedPair {
                                 lhs: Rc::clone(&lhs),
                                 rhs: Rc::clone(each_rhs_resolved),
                             },
@@ -563,10 +578,10 @@ where
                                 for each in inner {
                                     match cmp(each, each_rhs_resolved) {
                                         Ok(outcome) => {
-                                            statues.push(ComparisonResult::Comparable(
+                                            statues.push(RhsComparison::Comparable(
                                                 ComparisonWithRhs {
                                                     outcome,
-                                                    pair: LhsRhsPair {
+                                                    pair: ComparedPair {
                                                         lhs: Rc::new(each.clone()),
                                                         rhs: Rc::clone(each_rhs_resolved),
                                                     },
@@ -575,10 +590,10 @@ where
                                         }
 
                                         Err(Error::NotComparable(reason)) => {
-                                            statues.push(ComparisonResult::NotComparable(
+                                            statues.push(RhsComparison::NotComparable(
                                                 NotComparableWithRhs {
                                                     reason,
-                                                    pair: LhsRhsPair {
+                                                    pair: ComparedPair {
                                                         lhs: Rc::new(each.clone()),
                                                         rhs: Rc::clone(each_rhs_resolved),
                                                     },
@@ -600,10 +615,10 @@ where
                                         let rhs_inner_single_element = &rhs[0];
                                         match cmp(&lhs, rhs_inner_single_element) {
                                             Ok(outcome) => {
-                                                statues.push(ComparisonResult::Comparable(
+                                                statues.push(RhsComparison::Comparable(
                                                     ComparisonWithRhs {
                                                         outcome,
-                                                        pair: LhsRhsPair {
+                                                        pair: ComparedPair {
                                                             lhs: Rc::clone(&lhs),
                                                             rhs: Rc::new(
                                                                 rhs_inner_single_element.clone(),
@@ -614,10 +629,10 @@ where
                                             }
 
                                             Err(Error::NotComparable(reason)) => {
-                                                statues.push(ComparisonResult::NotComparable(
+                                                statues.push(RhsComparison::NotComparable(
                                                     NotComparableWithRhs {
                                                         reason,
-                                                        pair: LhsRhsPair {
+                                                        pair: ComparedPair {
                                                             lhs: Rc::clone(&lhs),
                                                             rhs: Rc::new(
                                                                 rhs_inner_single_element.clone(),
@@ -635,9 +650,9 @@ where
                             }
                         }
 
-                        statues.push(ComparisonResult::NotComparable(NotComparableWithRhs {
+                        statues.push(RhsComparison::NotComparable(NotComparableWithRhs {
                             reason,
-                            pair: LhsRhsPair {
+                            pair: ComparedPair {
                                 lhs: Rc::clone(&lhs),
                                 rhs: Rc::clone(each_rhs_resolved),
                             },
@@ -649,7 +664,7 @@ where
             }
 
             QueryResult::UnResolved(_ur) => {
-                statues.push(ComparisonResult::UnResolvedRhs(UnResolvedRhs {
+                statues.push(RhsComparison::UnResolvedRhs(UnResolvedRhs {
                     rhs: each_rhs.clone(),
                     lhs: Rc::clone(&lhs),
                 }));
@@ -685,17 +700,17 @@ fn in_cmp(not_in: bool) -> impl Fn(&PathAwareValue, &PathAwareValue) -> Result<b
 }
 
 fn report_value<'r, 'value: 'r, 'loc: 'value>(
-    each_res: &ComparisonResult,
+    each_res: &RhsComparison,
     cmp: (CmpOperator, bool),
     context: String,
     custom_message: Option<String>,
     eval_context: &'r mut dyn EvalContext<'value, 'loc>,
 ) -> Result<(QueryResult, Outcome)> {
     let (lhs_value, rhs_value, outcome, reason) = match each_res {
-        ComparisonResult::Comparable(ComparisonWithRhs {
+        RhsComparison::Comparable(ComparisonWithRhs {
             outcome,
             pair:
-                LhsRhsPair {
+                ComparedPair {
                     lhs: lhs_value,
                     rhs: rhs_value,
                 },
@@ -706,9 +721,9 @@ fn report_value<'r, 'value: 'r, 'loc: 'value>(
             None,
         ),
         //},
-        ComparisonResult::NotComparable(NotComparableWithRhs {
+        RhsComparison::NotComparable(NotComparableWithRhs {
             pair:
-                LhsRhsPair {
+                ComparedPair {
                     rhs: rhs_value,
                     lhs: lhs_value,
                 },
@@ -720,7 +735,7 @@ fn report_value<'r, 'value: 'r, 'loc: 'value>(
             None,
         ),
         //            },
-        ComparisonResult::UnResolvedRhs(UnResolvedRhs {
+        RhsComparison::UnResolvedRhs(UnResolvedRhs {
             lhs: lhs_value,
             rhs: rhs_query_result,
         }) => (
@@ -812,7 +827,7 @@ fn locate_report(lhs: Rc<PathAwareValue>, rhs: Rc<PathAwareValue>) -> (QueryResu
 }
 
 fn report_all_values<'r, 'value: 'r, 'loc: 'value>(
-    comparisons: Vec<ComparisonResult>,
+    comparisons: Vec<RhsComparison>,
     cmp: (CmpOperator, bool),
     context: String,
     custom_message: Option<String>,
@@ -832,7 +847,7 @@ fn report_all_values<'r, 'value: 'r, 'loc: 'value>(
 }
 
 fn report_at_least_one<'r, 'value: 'r, 'loc: 'value>(
-    rhs_comparisons: Vec<ComparisonResult>,
+    rhs_comparisons: Vec<RhsComparison>,
     cmp: (CmpOperator, bool),
     context: String,
     custom_message: Option<String>,
@@ -842,8 +857,8 @@ fn report_at_least_one<'r, 'value: 'r, 'loc: 'value>(
     let mut by_lhs_value = HashMap::new();
     for each in &rhs_comparisons {
         match each {
-            ComparisonResult::Comparable(ComparisonWithRhs {
-                pair: LhsRhsPair { lhs, rhs },
+            RhsComparison::Comparable(ComparisonWithRhs {
+                pair: ComparedPair { lhs, rhs },
                 ..
             }) => {
                 by_lhs_value
@@ -852,8 +867,8 @@ fn report_at_least_one<'r, 'value: 'r, 'loc: 'value>(
                     .push((each, QueryResult::Resolved(Rc::clone(rhs))));
             }
 
-            ComparisonResult::NotComparable(NotComparableWithRhs {
-                pair: LhsRhsPair { lhs, rhs },
+            RhsComparison::NotComparable(NotComparableWithRhs {
+                pair: ComparedPair { lhs, rhs },
                 ..
             }) => {
                 by_lhs_value
@@ -862,7 +877,7 @@ fn report_at_least_one<'r, 'value: 'r, 'loc: 'value>(
                     .push((each, QueryResult::Resolved(Rc::clone(rhs))));
             }
 
-            ComparisonResult::UnResolvedRhs(UnResolvedRhs { rhs, lhs }) => {
+            RhsComparison::UnResolvedRhs(UnResolvedRhs { rhs, lhs }) => {
                 if let QueryResult::UnResolved(..) = rhs {
                     by_lhs_value
                         .entry(lhs)
@@ -877,7 +892,7 @@ fn report_at_least_one<'r, 'value: 'r, 'loc: 'value>(
         let found = results.iter().find(|(r, _rhs)| {
             matches!(
                 r,
-                ComparisonResult::Comparable(ComparisonWithRhs { outcome: true, .. })
+                RhsComparison::Comparable(ComparisonWithRhs { outcome: true, .. })
             )
         });
         match found {
