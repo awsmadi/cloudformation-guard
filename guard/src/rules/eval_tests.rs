@@ -6499,32 +6499,39 @@ fn role_does_not_change_a_populated_comparison() -> Result<()> {
 /// Measured on a template containing no S3 bucket at all, so the bucket query selects nothing:
 ///
 ///     <query> == %lit     SKIP
-///     %lit == <query>      FAIL   <- the asymmetry, and only here
+///     %lit == <query>      FAIL
 ///     <query> != %lit     SKIP
-///     %lit != <query>      SKIP
+///     %lit != <query>      FAIL
 ///
-/// A comment in `CmpOperator::compare` used to call the FAIL a contradiction of
-/// docs/QUERY_AND_FILTERING.md:222, which says a query matching nothing makes block level
-/// clauses skip. On the measurements that claim is too strong, twice over: the doc sentence is
-/// about clauses whose *subject* is the empty query, and the disagreement is confined to the
-/// positive spelling -- both negated forms already agree at SKIP.
-///
-/// The reading that makes all four cells right is that Guard's comparison is not
-/// operand-symmetric even when the operator is. The left side is the subject being checked and
-/// the right side is the reference it is checked against:
+/// The rule the four cells follow is that Guard's comparison is not operand-symmetric even when
+/// the operator is. The left side is the subject being checked and the right side is the
+/// reference it is checked against, and only the subject's emptiness excuses the clause:
 ///
 /// - no subject values: there is nothing to assert, so the rule does not apply. SKIP. This is
-///   what lets one ruleset run against templates that do not all contain the resource type,
-///   which is the case the doc sentence describes.
-/// - no reference values: the assertion is that the subject is among the references, and
-///   nothing is among zero references, so it cannot hold. FAIL. Making this SKIP instead is
-///   how an allowlist that resolved empty used to report compliance, which
+///   what lets one ruleset run against templates that do not all contain the resource type.
+/// - no reference values: the clause cannot be decided, in either polarity, so it fails. FAIL.
+///   Making this SKIP is how an allowlist that resolved empty used to report compliance, which
 ///   `positive_comparison_against_empty_reference_fails` exists to prevent.
 ///
-/// So this is pinned rather than fixed, and deliberately: "fix the asymmetry" means picking one
-/// of those two to break. Making the mirrored form SKIP reintroduces the empty-allowlist wrong
-/// PASS; making the forward form FAIL breaks every ruleset run against a template lacking the
-/// resource type. v3.2.0 exits 0 for both spellings, so it had the wrong PASS in both.
+/// The mirrored negated cell asserted SKIP until the semantics were settled in review on
+/// PR #717. The argument for SKIP was that the clause is vacuously satisfied -- nothing can
+/// collide with zero references -- and it was rejected because a wrong SKIP exits 0 and is
+/// indistinguishable from a pass in CI, so `Property != %empty_reference` silently enforced
+/// nothing. `negated_comparison_against_empty_reference_fails` carries the full reasoning.
+///
+/// That decision also removed the wrinkle this test used to record. A comment in
+/// `CmpOperator::compare` once called the mirrored FAIL a contradiction of
+/// docs/QUERY_AND_FILTERING.md:222, which says a query matching nothing makes block level
+/// clauses skip; the answer was that the doc sentence is about clauses whose *subject* is the
+/// empty query, and that the disagreement was confined to the positive spelling because both
+/// negated forms agreed at SKIP. The second half of that no longer holds: both negated forms
+/// now follow the same operand-role rule as the positive ones, so the split is clean and the
+/// doc sentence is simply about the subject side.
+///
+/// This remains pinned rather than "fixed". Collapsing the asymmetry means picking one side to
+/// break: making the mirrored form SKIP reintroduces the empty-allowlist wrong PASS, and making
+/// the forward form FAIL breaks every ruleset run against a template lacking the resource type.
+/// v3.2.0 exits 0 for all four, so it had the wrong PASS in both mirrored cells.
 #[test]
 fn zero_selection_is_asymmetric_by_operand_role() -> Result<()> {
     let no_bucket =
@@ -6553,7 +6560,7 @@ fn zero_selection_is_asymmetric_by_operand_role() -> Result<()> {
         (
             "mirrored negated",
             format!("%expected != {query}"),
-            Status::SKIP,
+            Status::FAIL,
         ),
     ] {
         let rules = format!("let expected = 'Owner'\nrule r {{ {clause} }}");
