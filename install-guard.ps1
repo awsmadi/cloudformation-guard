@@ -53,12 +53,26 @@ function Get-ArchType {
 
 function Get-Versions {
   Write-Host "Getting the latest release version online"
-  $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/aws-cloudformation/cloudformation-guard/releases/latest"
+  $requestArgs = Get-GitHubApiAuthArgs
+  $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/aws-cloudformation/cloudformation-guard/releases/latest" @requestArgs
   $tag_name = $latestRelease.tag_name
   $majorVersion = $tag_name.Split('.')[0]
   $version = $tag_name
   Write-Host "Latest release is $version"
   return $majorVersion, $version
+}
+
+function Get-GitHubApiAuthArgs {
+  # The GitHub API rate limits anonymous requests per source IP. CI runners
+  # share their IPs, so that quota is often already spent, and the request
+  # fails. Authenticate when the environment offers a token. With no token
+  # this returns no arguments and the request goes out anonymously, exactly
+  # as it always has.
+  $token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $env:GH_TOKEN }
+  if (-not $token) {
+      return @{}
+  }
+  return @{ Headers = @{ Authorization = "Bearer $token" } }
 }
 
 function extract_tar {

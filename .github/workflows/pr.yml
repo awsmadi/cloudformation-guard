@@ -65,6 +65,8 @@ jobs:
         with:
           path: cloudformation-guard
       - name: Test install script on ${{ matrix.os }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           cd cloudformation-guard
@@ -79,6 +81,8 @@ jobs:
         with:
           path: cloudformation-guard
       - name: Test install script on windows-latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd cloudformation-guard
           ./install-guard.ps1

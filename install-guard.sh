@@ -79,7 +79,7 @@ get_version() {
 }
 
 get_latest_release() {
-	download https://api.github.com/repos/aws-cloudformation/cloudformation-guard/releases/latest |
+	download_from_api https://api.github.com/repos/aws-cloudformation/cloudformation-guard/releases/latest |
 		awk -F '"' '/tag_name/ { print $4 }'
 }
 
@@ -107,6 +107,29 @@ download() {
 		if ! (wget -qO- "$1"); then
 			err "error attempting to download from the github repository"
 		fi
+	fi
+}
+
+# The GitHub API rate limits anonymous requests per source IP. CI runners share
+# their IPs, so that quota is often already spent, and the request fails.
+# Authenticate when the environment offers a token. With no token the request
+# goes out anonymously, exactly as it always has. This is kept separate from
+# download() so the token only ever reaches the API host, never the storage
+# host a release asset redirects to.
+download_from_api() {
+	_token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+	if check_cmd curl; then
+		if [ -n "$_token" ]; then
+			curl -fsSL -H "Authorization: Bearer $_token" "$1"
+		else
+			curl -fsSL "$1"
+		fi || err "error attempting to download from the github repository"
+	else
+		if [ -n "$_token" ]; then
+			wget -qO- --header="Authorization: Bearer $_token" "$1"
+		else
+			wget -qO- "$1"
+		fi || err "error attempting to download from the github repository"
 	fi
 }
 
