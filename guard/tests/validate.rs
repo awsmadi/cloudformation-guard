@@ -2031,9 +2031,16 @@ mod validate_tests {
         // carry its own parent and not the other's is what makes the assertion above mean "the
         // locator distinguishes them" rather than "the two lines happen to be unequal".
         for parent in ["first", "second"] {
+            // The locator renders the path with the platform's separator, so the fragment is
+            // matched against a copy with the separators normalized. Spelling the expectation
+            // with `MAIN_SEPARATOR` instead would assert which separator the locator chose,
+            // which is not what this test is about.
             let matched: Vec<&&str> = notices
                 .iter()
-                .filter(|n| n.contains(&format!("{parent}/incomparable_membership.guard")))
+                .filter(|n| {
+                    n.replace('\\', "/")
+                        .contains(&format!("{parent}/incomparable_membership.guard"))
+                })
                 .collect();
 
             assert_eq!(
