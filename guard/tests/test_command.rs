@@ -329,12 +329,21 @@ mod test_command_tests {
         );
     }
 
+    /// A reported path is rendered with the platform's separator, so a fragment spelled with `/`
+    /// does not match the report verbatim on Windows. The walker joins each file name onto the
+    /// directory it was given, which leaves the directory as the caller spelled it and only the
+    /// last separator platform-dependent -- so the fragments below are compared against a copy
+    /// with the separators normalized rather than rebuilt around `MAIN_SEPARATOR`.
+    fn with_forward_slashes(reported: &str) -> String {
+        reported.replace('\\', "/")
+    }
+
     /// The plaintext directory report writes one section per rules file, terminated by a `---` line.
     /// Returns the section that names `rule_file`.
     fn section_for<'out>(stdout: &'out str, rule_file: &str) -> &'out str {
         stdout
             .split("\n---")
-            .find(|section| section.contains(rule_file))
+            .find(|section| with_forward_slashes(section).contains(rule_file))
             .unwrap_or_else(|| panic!("no section mentions {} in:\n{}", rule_file, stdout))
     }
 
@@ -471,7 +480,7 @@ mod test_command_tests {
 
         let stdout = writer.stripped().expect("failed to read stdout");
         assert!(
-            stdout.contains(
+            with_forward_slashes(&stdout).contains(
                 "Guard File resources/test-command/rules-file-without-tests/orphan.guard did not have any tests associated, skipping."
             ),
             "the unpaired rules file must still be reported as skipped:\n{}",
@@ -563,7 +572,7 @@ mod test_command_tests {
 
         let stderr = err_writer.err_to_stripped().expect("failed to read stderr");
         assert!(
-            stderr.contains(
+            with_forward_slashes(&stderr).contains(
                 "resources/test-command/orphaned-test-file/tests/s3_tests.yml did not match any rules file, so it was not run"
             ),
             "the ignored test file must be named, path included:\n{}",
@@ -572,7 +581,7 @@ mod test_command_tests {
 
         let stdout = out_writer.stripped().expect("failed to read stdout");
         assert!(
-            stdout.contains(
+            with_forward_slashes(&stdout).contains(
                 "Guard File resources/test-command/orphaned-test-file/s3_bucket.guard did not have any tests associated, skipping."
             ),
             "and the existing line about the rules file must be unchanged:\n{}",
@@ -984,7 +993,7 @@ mod test_command_tests {
             stdout
         );
         assert!(
-            stdout.contains(&format!(
+            with_forward_slashes(&stdout).contains(&format!(
                 "Guard File {DIR}/logging.guard did not have any tests associated, skipping."
             )),
             "and the sibling file must be shown taking no part in the run:\n{}",
