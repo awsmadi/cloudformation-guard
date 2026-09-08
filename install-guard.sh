@@ -118,6 +118,13 @@ download() {
 # host a release asset redirects to.
 download_from_api() {
 	_token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+	# Report which path was taken, never the token itself. stderr, because this
+	# function's stdout is the API response and is parsed by the caller.
+	if [ -n "$_token" ]; then
+		echo "Found a token in the environment, so the request is authenticated." >&2
+	else
+		echo "No GITHUB_TOKEN or GH_TOKEN set, so the request is anonymous." >&2
+	fi
 	if check_cmd curl; then
 		if [ -n "$_token" ]; then
 			curl -fsSL -H "Authorization: Bearer $_token" "$1"

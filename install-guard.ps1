@@ -70,8 +70,10 @@ function Get-GitHubApiAuthArgs {
   # as it always has.
   $token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $env:GH_TOKEN }
   if (-not $token) {
+      Write-Host "No GITHUB_TOKEN or GH_TOKEN set, so the request is anonymous."
       return @{}
   }
+  Write-Host "Found a token in the environment, so the request is authenticated."
   return @{ Headers = @{ Authorization = "Bearer $token" } }
 }
 
