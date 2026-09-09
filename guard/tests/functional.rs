@@ -209,4 +209,54 @@ mod functional_tests {
             );
         }
     }
+
+    /// A JSON integer above `i64::MAX` does not answer a numeric guard from a flipped sign.
+    ///
+    /// `run_checks` tries `serde_json::from_str` first and only falls back to `serde_yaml` when that
+    /// fails (`commands/helper.rs:51`). `18446744073709551615` is valid JSON, so it takes the JSON
+    /// branch and reaches `TryFrom<&serde_json::Value> for Value`, which is a separate arm from the
+    /// `serde_yaml` one. Fixing only the YAML arm left this entry point reading `u64::MAX` as `-1`
+    /// through `as i64` -- so `Size < 0` reported PASS on a document whose `Size` is the largest
+    /// unsigned 64-bit integer, at exit 0 with nothing on either channel.
+    ///
+    /// This is the surface `cfn_guard_run_checks` in `guard-ffi/src/lib.rs` and the Lambda handler in
+    /// `guard-lambda/src/main.rs` call, so the sign flip was reachable by every caller that is not the
+    /// CLI. Neither has a stderr channel, which is why the assertion is on the returned report.
+    ///
+    /// `< 0` rather than a comparison against the number itself: it is the shortest clause whose
+    /// correct answer is unambiguous for every value the input could hold. No unsigned 64-bit integer
+    /// is negative, so FAIL is right whether the digits are kept or the comparison refuses -- and only
+    /// a sign flip can produce PASS.
+    #[test]
+    fn a_json_integer_above_i64_max_does_not_pass_a_negative_comparison() {
+        use cfn_guard::*;
+
+        let data = r#"{ "Size": 18446744073709551615 }"#;
+
+        let serialized = run_checks(
+            ValidateInput {
+                content: data,
+                file_name: "functional_test.json",
+            },
+            ValidateInput {
+                content: "rule r { Size < 0 }",
+                file_name: "functional_test.rule",
+            },
+            false,
+        )
+        .unwrap();
+
+        assert!(
+            !serialized.contains("PASS"),
+            "`Size < 0` must not pass for 18446744073709551615 -- a PASS here is the `as i64` sign \
+             flip reinterpreting u64::MAX as -1 on the JSON branch of `run_checks`, which is what \
+             the FFI and Lambda entry points call; got:\n{}",
+            serialized
+        );
+        assert!(
+            serialized.contains("FAIL"),
+            "`Size < 0` must report FAIL for 18446744073709551615; got:\n{}",
+            serialized
+        );
+    }
 }

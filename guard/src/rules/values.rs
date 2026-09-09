@@ -310,10 +310,10 @@ impl Value {
     /// was the alternative and is not used: it accepts a duplicate member name where `serde_yaml`
     /// refuses one, which is the refusal
     /// `guard/resources/validate/functions/data/embedded_json_the_parser_rejects.yaml` exists to pin;
-    /// it reaches `TryFrom<&serde_json::Value>`, which still reads an integer above `i64::MAX` as a
-    /// negative through `as i64` -- the sign flip this file's own `is_u64` arm was fixed for, and
-    /// `18446744073709551615` is valid JSON; and it refuses every YAML-only spelling that reaches
-    /// `json_parse` successfully today, which is a narrowing no caller asked for.
+    /// and it refuses every YAML-only spelling that reaches `json_parse` successfully today, which is a
+    /// narrowing no caller asked for. The third reason this comment used to give -- that
+    /// `TryFrom<&serde_json::Value>` read an integer above `i64::MAX` as a negative through `as i64` --
+    /// no longer holds: that arm now keeps the digits, the same way this file's `is_u64` arm does.
     pub(crate) fn try_from_json(value: &serde_yaml::Value) -> crate::rules::Result<Value> {
         convert_yaml(value, MergeKey::Literal)
     }
@@ -420,11 +420,32 @@ impl<'a> TryFrom<&'a serde_json::Value> for Value {
                 if num.is_i64() {
                     Ok(Value::Int(num.as_i64().unwrap()))
                 } else if num.is_u64() {
+                    // The same sign flip `convert_yaml`'s `is_u64` arm was fixed for, and the same
+                    // fix, because this is a separate arm reached by a separate entry point: the
+                    // public `run_checks` tries `serde_json::from_str` first and only falls back to
+                    // `serde_yaml` when that fails (`commands/helper.rs:51`). An integer above
+                    // `i64::MAX` is valid JSON, so it takes the JSON branch and never reaches the
+                    // arm that was fixed -- which left `Size < 0` reporting PASS for
+                    // 18446744073709551615 through `run_checks`, and therefore through `guard-ffi`
+                    // and `guard-lambda`, both of which call it.
                     //
-                    // Yes we are losing precision here. TODO fix this
+                    // This arm previously read `num.as_u64().unwrap() as i64` under a comment saying
+                    // "Yes we are losing precision here. TODO fix this". It was not losing
+                    // precision: `as i64` reinterprets the bit pattern, so the sign flipped, and
+                    // `u64::MAX` read as exactly -1.
                     //
-                    Ok(Value::Int(num.as_u64().unwrap() as i64))
+                    // The digits are kept instead, matching `convert_yaml` so the two arms agree on
+                    // the same input. `u64::to_string` is exact, so nothing is invented, and a
+                    // comparison against a number then refuses rather than answering from a number
+                    // the document does not contain.
+                    Ok(Value::String(num.as_u64().unwrap().to_string()))
                 } else {
+                    // No finiteness gate here, unlike `convert_yaml`. `serde_json` refuses a
+                    // non-finite float while it is still text -- `1e400` is `number out of range` at
+                    // parse time, and there is no `.inf` or `.nan` spelling in JSON to accept -- so
+                    // a `serde_json::Number` that reaches this arm is always finite and the gate
+                    // would be dead. The YAML arm needs one because the libyaml loader does accept
+                    // those spellings.
                     Ok(Value::Float(num.as_f64().unwrap()))
                 }
             }
