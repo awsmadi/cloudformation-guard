@@ -191,6 +191,13 @@ fn a_null_pointer_and_invalid_utf8_do_not_report_the_same_thing() {
 /// stronger reason -- its payload is `Infallible`, so no value of it exists and the arm is
 /// unreachable by construction. None of those five numbers appears below, so the arms covered here
 /// are distinct from them too.
+///
+/// Every other variant is covered, including `UnsupportedDocument` (25) and `UndecidableComparison`
+/// (26). Both carry a `String`, so neither has the payload excuse the five above have, and both were
+/// added to `get_code` after this test was written -- which is how they came to be the only
+/// constructible variants it did not reach. They are also the two nearest a collision: they are the
+/// highest codes in the table and they sit on the far side of the 23/24 input codes, so an arm added
+/// later that reuses 25 or 26 is the mistake this assertion exists to catch.
 #[test]
 fn every_error_code_is_distinct_and_usable() {
     let errors = vec![
@@ -214,6 +221,8 @@ fn every_error_code_is_distinct_and_usable() {
         FfiError::Guard(Error::InternalError(InternalError::InvalidKeyType(
             String::from("x"),
         ))),
+        FfiError::Guard(Error::UnsupportedDocument(String::from("x"))),
+        FfiError::Guard(Error::UndecidableComparison(String::from("x"))),
         FfiError::Input(InvalidInput {
             whose: "data",
             field: "content",

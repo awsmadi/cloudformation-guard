@@ -34,8 +34,10 @@ use types::FfiValidateInput;
  * for a null one and 24 for one that is not UTF-8, and `err.message` names the field. Both used to
  * panic inside the conversion -- with the null message either way -- and the caught panic reached
  * the caller as -1, which nothing documents. Every other non-zero code comes from `get_code` in
- * errors.rs and is in 1..=24, skipping 19 so it cannot be confused with the CLI's
- * validation-failure exit code.
+ * errors.rs and is in 1..=26, skipping 19 so it cannot be confused with the CLI's
+ * validation-failure exit code. 25 is an unsupported document and 26 a comparison the engine
+ * abandoned; both sit after the two invalid-input codes rather than before them, for the reason
+ * `get_code` records at 25.
  */
 #[no_mangle]
 pub extern "C" fn cfn_guard_run_checks<'a>(
