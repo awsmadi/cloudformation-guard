@@ -337,8 +337,16 @@ fn convert_yaml(value: &serde_yaml::Value, merge_key: MergeKey) -> crate::rules:
                 //
                 // The digits are kept instead. `u64::to_string` is exact, so nothing is invented,
                 // and a comparison against a number then refuses rather than answering from a
-                // number the input does not contain. It is also the answer the libyaml loader
-                // already gives an integer this wide, so the two agree.
+                // number the input does not contain.
+                //
+                // The libyaml loader also keeps the text for an integer this wide, so the two agree
+                // on a plain decimal spelling -- and only on that one. They diverge on any other
+                // spelling of the same value, because this arm writes what `u64::to_string` gives
+                // while that loader keeps the source text: `0xFFFFFFFFFFFFFFFF` arrives here as
+                // `18446744073709551615` and there as `0xFFFFFFFFFFFFFFFF`, and a leading `+` is
+                // dropped here and kept there. `a_spelling_the_two_loaders_read_differently` pins
+                // both readings of each. An earlier revision of this comment claimed agreement
+                // without that qualification, which is measurably false for those two spellings.
                 Ok(Value::String(num.as_u64().unwrap().to_string()))
             } else {
                 let float = num.as_f64().unwrap();

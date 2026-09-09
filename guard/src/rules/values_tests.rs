@@ -541,13 +541,19 @@ Resources:
 /// the non-string scalar keys, which the round that added this test fixed on the libyaml loader only.
 /// The document with those two blocks in it fails this assertion against `values.rs` as it stood then,
 /// which is measured, and each of the two was measured diverging on its own through `guard test`.
+///
+/// Three spellings are deliberately NOT in the document below, because the two loaders genuinely read
+/// them differently and no change here can make them agree:
+/// `a_spelling_the_two_loaders_read_differently` pins each one's two readings instead, so a change to
+/// either side fails, while this test keeps asserting agreement on everything else. Moving them here
+/// rather than deleting them is the point -- an agreement claim that quietly excluded them would be
+/// weaker than one that names them.
 #[test]
 fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
     let document = r#"
 Mappings:
   NonStringKeys:
     123456789012: an account id
-    0755: a file mode
     0x1F: a bitmask
     1.0: a whole float
     2.5: a fractional float
@@ -570,7 +576,6 @@ Resources:
       not_a_bool_off: off
       hex: 0x1F
       octal: 0o17
-      leading_zero: 0755
       plain_int: 42
       signed_int: +42
       i64_max: 9223372036854775807
@@ -606,6 +611,74 @@ Resources:
         serde_json_value, libyaml_json,
         "the two loaders read the same bytes as different values, so which command read a file \
          decides what it means"
+    );
+
+    Ok(())
+}
+
+/// The spellings the two loaders read differently, with both readings pinned.
+///
+/// These are excluded from `both_loaders_resolve_the_same_document_to_the_same_value` because they do
+/// not agree and cannot be made to. Pinned here rather than dropped, so that a change to either side
+/// fails: the agreement test proves nothing about a case it does not contain, and a reader who found
+/// one of these missing from it would have no way to tell a deliberate exclusion from an oversight.
+///
+/// What each divergence is:
+///
+///   - `0755`. The libyaml loader resolves a leading-zero decimal, which is the reading it has always
+///     had, so the value is `755` and a mapping key spelled that way is addressed as `755`.
+///     `serde_yaml` gates its number path behind `digits_but_not_number`, which is true for a
+///     leading-zero decimal, so it yields the string. Choosing this loader's own reading is what stops
+///     a numeric `when` condition over a file mode from failing to apply; the cost is this divergence,
+///     which predates the choice -- `serde_yaml` and `parse::<i64>` never agreed on these characters.
+///   - `0xFFFFFFFFFFFFFFFF` and `+18446744073709551615`. Both are integers above `i64::MAX`. The
+///     libyaml loader keeps the literal source text, so the hex spelling stays hex and the signed
+///     spelling keeps its `+`. `serde_yaml` resolves each to a `u64` first and the conversion then
+///     writes the decimal digits, so both arrive as `18446744073709551615`. Same value, different
+///     text, and a clause comparing against either spelling holds under one command and not the other.
+///
+/// Asserted as a mapping value rather than a key so the reading under test is the scalar conversion
+/// and not `scalar_key_name`, which has its own rendering rules.
+#[rstest::rstest]
+#[case::leading_zero_decimal("0755", "755", "0755")]
+#[case::wide_hex("0xFFFFFFFFFFFFFFFF", "0xFFFFFFFFFFFFFFFF", "18446744073709551615")]
+#[case::wide_leading_plus("+18446744073709551615", "+18446744073709551615", "18446744073709551615")]
+fn a_spelling_the_two_loaders_read_differently(
+    #[case] scalar: &str,
+    #[case] expected_libyaml: &str,
+    #[case] expected_serde: &str,
+) -> Result<()> {
+    let document = format!("probe: {scalar}\n");
+
+    let via_libyaml = PathAwareValue::try_from(crate::rules::values::read_from(&document)?)?;
+    let via_serde =
+        PathAwareValue::try_from(serde_yaml::from_str::<serde_yaml::Value>(&document)?)?;
+
+    let (_, libyaml_json): (String, serde_json::Value) = (&via_libyaml).try_into()?;
+    let (_, serde_json_value): (String, serde_json::Value) = (&via_serde).try_into()?;
+
+    let rendered = |value: &serde_json::Value| -> String {
+        match value.get("probe").expect("the key is present") {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }
+    };
+
+    assert_eq!(
+        expected_libyaml,
+        rendered(&libyaml_json),
+        "the libyaml loader's reading of `{scalar}` changed"
+    );
+    assert_eq!(
+        expected_serde,
+        rendered(&serde_json_value),
+        "the serde reading of `{scalar}` changed"
+    );
+    assert_ne!(
+        rendered(&libyaml_json),
+        rendered(&serde_json_value),
+        "`{scalar}` now reads the same through both loaders, so it belongs in \
+         both_loaders_resolve_the_same_document_to_the_same_value rather than here"
     );
 
     Ok(())

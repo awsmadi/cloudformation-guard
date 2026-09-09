@@ -223,40 +223,93 @@ mod functional_tests {
     /// `guard-lambda/src/main.rs` call, so the sign flip was reachable by every caller that is not the
     /// CLI. Neither has a stderr channel, which is why the assertion is on the returned report.
     ///
-    /// `< 0` rather than a comparison against the number itself: it is the shortest clause whose
-    /// correct answer is unambiguous for every value the input could hold. No unsigned 64-bit integer
-    /// is negative, so FAIL is right whether the digits are kept or the comparison refuses -- and only
-    /// a sign flip can produce PASS.
-    #[test]
-    fn a_json_integer_above_i64_max_does_not_pass_a_negative_comparison() {
+    /// # What each assertion below can and cannot detect
+    ///
+    /// `Size < 0` was asserted here before, and it did detect the sign flip: measured against the
+    /// released binary it reports PASS, and it reports FAIL once the digits are kept. What it cannot do
+    /// is say *which* representation replaced the negative number -- a float, a decimal string and a
+    /// clamped integer all report FAIL for it -- so it pins that the value is no longer negative and
+    /// nothing about what it now is.
+    ///
+    /// `Size > 100` discriminates nothing at all. The flipped `-1` fails it and a refusal fails it, for
+    /// opposite reasons and with the same verdict; measured, both the released binary and this one
+    /// report FAIL.
+    ///
+    /// The identity comparison is the one that separates the representations, and that is the whole of
+    /// what keeping the digits buys: measured, the released binary reports FAIL for it and this one
+    /// reports PASS.
+    fn wide_integer_report(rule: &str) -> String {
         use cfn_guard::*;
 
-        let data = r#"{ "Size": 18446744073709551615 }"#;
-
-        let serialized = run_checks(
+        run_checks(
             ValidateInput {
-                content: data,
+                content: r#"{ "Size": 18446744073709551615, "Public": true }"#,
                 file_name: "functional_test.json",
             },
             ValidateInput {
-                content: "rule r { Size < 0 }",
+                content: rule,
                 file_name: "functional_test.rule",
             },
             false,
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    /// The digits survive, exactly, and that is what this representation is for.
+    ///
+    /// The discriminating assertion. `as u64 as i64` gave `Int(-1)`, which compares against the string
+    /// of digits as a kind mismatch and reports FAIL; keeping the digits makes the two equal and
+    /// reports PASS. So this is the one shape whose verdict differs between the sign flip and the text,
+    /// and it is what the earlier `< 0` assertion should have been.
+    #[test]
+    fn a_json_integer_above_i64_max_keeps_its_digits_exactly() {
+        let serialized = wide_integer_report(r#"rule r { Size == "18446744073709551615" }"#);
 
         assert!(
-            !serialized.contains("PASS"),
-            "`Size < 0` must not pass for 18446744073709551615 -- a PASS here is the `as i64` sign \
-             flip reinterpreting u64::MAX as -1 on the JSON branch of `run_checks`, which is what \
-             the FFI and Lambda entry points call; got:\n{}",
+            serialized.contains("PASS") && !serialized.contains("FAIL"),
+            "the exact digits must survive the JSON conversion -- a FAIL here means the value was \
+             turned into some other number on the way in, which is what `as i64` did; got:\n{}",
             serialized
         );
+    }
+
+    /// An ordering comparison against a number has no answer, and the guarded body is not evaluated.
+    ///
+    /// This records a cost, not a behavior worth having. `18446744073709551615 > 100` is true, so the
+    /// correct verdict for the bare clause is PASS and the correct outcome for the gate is that the
+    /// block runs. Neither happens: the value is a string, `compare_values` has no arm for a string
+    /// against an integer, and the clause has no answer -- which fails closed as an assertion and, as a
+    /// condition, leaves the rule not applicable so the run exits 0 with the block unevaluated.
+    ///
+    /// It is asserted so that the cost is visible and cannot change unnoticed. The alternative
+    /// representation, resolving the value to a float, answers both of these correctly and in exchange
+    /// reports two distinct integers as equal -- measured, `9223372036854775809` and
+    /// `9223372036854775810` both become `9.223372036854776e18`, so a clause asserting they differ is
+    /// reported non-compliant. Exact identity was chosen over an answerable ordering because a wrong
+    /// report of a violation costs more than a rule that declines to answer. Neither option is right;
+    /// the value space cannot hold this integer, and that is the part this change does not fix.
+    #[test]
+    fn an_ordering_comparison_on_a_wide_integer_has_no_answer() {
+        let asserted = wide_integer_report("rule r { Size > 100 }");
         assert!(
-            serialized.contains("FAIL"),
-            "`Size < 0` must report FAIL for 18446744073709551615; got:\n{}",
-            serialized
+            asserted.contains("FAIL"),
+            "expected the ordering clause to fail closed; got:\n{}",
+            asserted
+        );
+
+        let gated = wide_integer_report("rule r when Size > 100 { Public == false }");
+        assert!(
+            !gated.contains("FAIL"),
+            "the gate is expected not to apply, so the body must not be reported as failing. A FAIL \
+             here would mean the ordering became answerable, which is a fix rather than a break -- \
+             delete this assertion and move the case to the discriminating test above; got:\n{}",
+            gated
+        );
+        assert!(
+            gated.contains("SKIP") || gated.contains("not_applicable"),
+            "the gate must be recorded as not applying rather than silently absent from the report, \
+             so an operator reading it can see the rule did not run; got:\n{}",
+            gated
         );
     }
 }
