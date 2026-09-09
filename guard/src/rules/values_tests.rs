@@ -639,6 +639,20 @@ Resources:
 ///
 /// Asserted as a mapping value rather than a key so the reading under test is the scalar conversion
 /// and not `scalar_key_name`, which has its own rendering rules.
+///
+/// # Why removing these from the agreement document is scoping and not weakening
+///
+/// The distinction is worth stating because the two look alike in a diff. Weakening would be relaxing
+/// the comparison in `both_loaders_resolve_the_same_document_to_the_same_value` -- comparing fewer
+/// fields, or tolerating a mismatch -- which would leave it unable to detect *any* divergence,
+/// including one nobody has seen. That is not what happened. It still compares whole documents
+/// exactly, so a spelling that starts diverging fails it.
+///
+/// What changed is which spellings are in its input, and the three that came out are pinned here with
+/// both of their readings, so a change to either side fails and a case that starts agreeing fails the
+/// `assert_ne!` below. The set is closed by
+/// `the_known_loader_divergences_are_exactly_these_three`: adding a fourth spelling here without
+/// adding it there fails, which is what stops this list absorbing a new divergence quietly.
 #[rstest::rstest]
 #[case::leading_zero_decimal("0755", "755", "0755")]
 #[case::wide_hex("0xFFFFFFFFFFFFFFFF", "0xFFFFFFFFFFFFFFFF", "18446744073709551615")]
@@ -682,6 +696,52 @@ fn a_spelling_the_two_loaders_read_differently(
     );
 
     Ok(())
+}
+
+/// The spellings excluded from the agreement document are exactly these three.
+///
+/// This is what closes the set. Without it, `a_spelling_the_two_loaders_read_differently` could take a
+/// fourth case and the agreement test could lose a fourth spelling from its document, and both would
+/// stay green -- the exclusion list growing quietly, which is the failure mode that makes an
+/// exclusion list worse than no exclusion at all.
+///
+/// Held as a list here rather than counted from the `rstest` cases, because a case attribute is
+/// compile-time and cannot be enumerated at run time. Adding a case above without adding its spelling
+/// here fails on the count, and adding it here without a case fails on the assertion that each one
+/// actually diverges.
+#[test]
+fn the_known_loader_divergences_are_exactly_these_three() {
+    const DIVERGENT: [&str; 3] = ["0755", "0xFFFFFFFFFFFFFFFF", "+18446744073709551615"];
+
+    assert_eq!(
+        3,
+        DIVERGENT.len(),
+        "the set of spellings the two loaders read differently is closed at three; a new one is a \
+         new divergence and needs its own case and its own reason, not an extra entry here"
+    );
+
+    for scalar in DIVERGENT {
+        let document = format!("probe: {scalar}\n");
+        let via_libyaml = PathAwareValue::try_from(
+            crate::rules::values::read_from(&document).expect("the libyaml loader reads it"),
+        )
+        .expect("the conversion succeeds");
+        let via_serde = PathAwareValue::try_from(
+            serde_yaml::from_str::<serde_yaml::Value>(&document).expect("serde reads it"),
+        )
+        .expect("the conversion succeeds");
+
+        let (_, libyaml_json): (String, serde_json::Value) =
+            (&via_libyaml).try_into().expect("it serializes");
+        let (_, serde_json_value): (String, serde_json::Value) =
+            (&via_serde).try_into().expect("it serializes");
+
+        assert_ne!(
+            libyaml_json, serde_json_value,
+            "`{scalar}` is listed as divergent but the two loaders now agree on it, so it belongs \
+             back in the agreement document"
+        );
+    }
 }
 
 /// The serde-backed conversion does not read a positive integer as negative, and does not admit a
