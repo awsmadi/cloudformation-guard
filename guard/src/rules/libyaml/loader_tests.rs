@@ -936,10 +936,16 @@ fn an_empty_plain_scalar_is_null_and_a_quoted_one_is_not(
 ///
 /// This was `str::parse::<i64>`, which takes a sign and decimal digits and nothing else, so no radix
 /// prefix resolved as a number -- `0x1F` and `0o17` were strings and a rule comparing a netmask or a
-/// permission bitmask to a number could not match -- while `0755` was read as decimal 755. The
-/// leading-zero case is the one where the two YAML versions assign different *values* to the same
-/// characters, 493 under 1.1 and 755 under 1.2 core, so it stays the literal text rather than
-/// becoming either.
+/// permission bitmask to a number could not match -- while `0755` was read as decimal 755.
+///
+/// A leading-zero decimal resolves as decimal, which is the reading it already had. The two YAML
+/// versions do assign different values to those characters, 493 under 1.1 and 755 under 1.2 core, and
+/// an earlier revision kept the literal text rather than choosing between them. That is defensible
+/// about the ambiguity and wrong about the consequence: an unresolved scalar becomes a `String`, an
+/// ordering comparison against a number has no arm for that pair, and a `when` condition holding one
+/// does not apply -- so `when Mode < 1000 { ... }` over `Mode: 0755` stopped evaluating its body and
+/// exited 0, where the same rule and document exit 19 without that revision. Choosing the reading
+/// this loader already had costs no precision, since every leading-zero decimal fits `i64`.
 ///
 /// The `0X`/`0O`/`0b` cases are the boundary: 1.2 core's regexes are lowercase-only and have no
 /// binary form, and each of these would be a number under some other schema.
@@ -955,9 +961,9 @@ fn an_empty_plain_scalar_is_null_and_a_quoted_one_is_not(
 #[case::negative_octal("-0o17", Some(-15))]
 #[case::i64_max("9223372036854775807", Some(i64::MAX))]
 #[case::i64_min("-9223372036854775808", Some(i64::MIN))]
-#[case::redundant_leading_zero("0755", None)]
-#[case::two_zeros("00", None)]
-#[case::signed_leading_zero("+0755", None)]
+#[case::redundant_leading_zero("0755", Some(755))]
+#[case::two_zeros("00", Some(0))]
+#[case::signed_leading_zero("+0755", Some(755))]
 #[case::uppercase_hex_prefix("0X1F", None)]
 #[case::uppercase_octal_prefix("0O17", None)]
 #[case::binary("0b101", None)]
@@ -1653,7 +1659,10 @@ fn a_small_float_that_is_still_representable_stays_a_float(#[case] scalar: &str)
 #[case::a_capitalised_true("True: x", "true")]
 #[case::a_false("false: x", "false")]
 #[case::hex_resolved_first("0x1F: x", "31")]
-#[case::a_leading_zero_stays_text("0755: x", "0755")]
+// A leading zero is resolved too, so the key is addressed as `755` rather than as `0755`. That is
+// this loader's pre-existing reading of those characters and it is what `serde_yaml` does NOT do --
+// see `both_loaders_resolve_the_same_document_to_the_same_value`, which records the divergence.
+#[case::a_leading_zero_is_resolved("0755: x", "755")]
 fn a_scalar_key_becomes_the_text_cloudformation_would_give_it(
     #[case] content: &str,
     #[case] expected: &str,

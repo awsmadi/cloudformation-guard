@@ -921,9 +921,18 @@ fn resolve_int(val: &str) -> IntScalar {
         return IntScalar::NotAnInteger;
     }
 
-    if radix == 10 && digits.len() > 1 && digits.starts_with('0') {
-        return IntScalar::Unresolvable;
-    }
+    // A leading-zero decimal resolves as decimal, which is what `parse::<i64>` gives it upstream:
+    // `0755` is 755. This arm used to return `Unresolvable`, on the reading that YAML 1.1 makes
+    // `0755` octal 493 while YAML 1.2 makes it decimal 755, so resolving to either quietly picks a
+    // schema. That reading is defensible and the consequence was not: a scalar the loader declines to
+    // resolve becomes a `String`, an ordering comparison against a number then has no arm, and in a
+    // `when` condition the gate does not apply -- so `when Mode < 1000 { ... }` over `Mode: 0755`
+    // stopped evaluating its body and the file exited 0, where upstream evaluates it and exits 19.
+    //
+    // Silently disarming a gate is worse than picking the schema upstream already picked, and every
+    // leading-zero decimal fits `i64` exactly, so this direction costs no precision. The 1.1/1.2
+    // ambiguity is real but it is not this change's to settle, and settling it by refusing to answer
+    // was the worse of the two options available here.
 
     let signed = if negative {
         Cow::Owned(format!("-{digits}"))
