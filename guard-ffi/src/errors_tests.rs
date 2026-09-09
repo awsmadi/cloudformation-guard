@@ -159,6 +159,45 @@ fn an_unreadable_input_pointer_converts_to_its_own_code() {
     }
 }
 
+/// The two codes this change added carry the values the header publishes.
+///
+/// `every_error_code_is_distinct_and_usable` reaches both variants, but it asserts only that each code
+/// is positive, distinct from the others and not 19. Those are properties, and properties survive an
+/// identity swap: exchanging the `25` and `26` literals in `get_code` leaves that assertion passing
+/// while the header in `lib.rs` says 25 is an unsupported document when it has become an abandoned
+/// comparison, so a C caller switching on 26 gets the wrong error class. Renumbering either past 26
+/// also breaks the documented range with nothing failing.
+///
+/// 22, 23 and 24 are pinned exactly elsewhere in this file. These were the only codes the change
+/// touched and the only ones left unpinned, which is the combination worth closing.
+#[test]
+fn the_two_added_codes_are_the_ones_the_header_documents() {
+    let cases = [
+        (
+            FfiError::Guard(Error::UnsupportedDocument(String::from("x"))),
+            25,
+        ),
+        (
+            FfiError::Guard(Error::UndecidableComparison(String::from("x"))),
+            26,
+        ),
+    ];
+
+    let mut highest = 0;
+    for (error, expected_code) in cases {
+        let code = ExternError::from(error).get_code().code();
+        assert_eq!(expected_code, code);
+        highest = highest.max(code);
+    }
+
+    // The upper bound `lib.rs`'s header comment advertises. Asserted here rather than left implicit,
+    // because the header is a promise to a C caller and nothing else checks it.
+    assert_eq!(
+        26, highest,
+        "26 is the maximum the header documents; a code above it makes that range wrong"
+    );
+}
+
 /// The two causes are told apart, which they were not before: `FfiStr::as_str` panics with
 /// "Unexpected null string pointer passed to rust" for invalid UTF-8 as well, sending the real cause
 /// to `log::error!` -- which a C caller has no Rust logger to receive.
