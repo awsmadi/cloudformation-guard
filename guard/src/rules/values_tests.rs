@@ -656,7 +656,11 @@ Resources:
 #[rstest::rstest]
 #[case::leading_zero_decimal("0755", "755", "0755")]
 #[case::wide_hex("0xFFFFFFFFFFFFFFFF", "0xFFFFFFFFFFFFFFFF", "18446744073709551615")]
-#[case::wide_leading_plus("+18446744073709551615", "+18446744073709551615", "18446744073709551615")]
+#[case::wide_leading_plus(
+    "+18446744073709551615",
+    "+18446744073709551615",
+    "18446744073709551615"
+)]
 fn a_spelling_the_two_loaders_read_differently(
     #[case] scalar: &str,
     #[case] expected_libyaml: &str,
