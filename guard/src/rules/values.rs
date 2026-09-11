@@ -344,8 +344,8 @@ fn convert_yaml(value: &serde_yaml::Value, merge_key: MergeKey) -> crate::rules:
                 // spelling of the same value, because this arm writes what `u64::to_string` gives
                 // while that loader keeps the source text: `0xFFFFFFFFFFFFFFFF` arrives here as
                 // `18446744073709551615` and there as `0xFFFFFFFFFFFFFFFF`, and a leading `+` is
-                // dropped here and kept there. `a_spelling_the_two_loaders_read_differently` pins
-                // both readings of each. An earlier revision of this comment claimed agreement
+                // dropped here and kept there. `the_spellings_the_two_loaders_read_differently`
+                // pins both readings of each. An earlier revision of this comment claimed agreement
                 // without that qualification, which is measurably false for those two spellings.
                 Ok(Value::String(num.as_u64().unwrap().to_string()))
             } else {

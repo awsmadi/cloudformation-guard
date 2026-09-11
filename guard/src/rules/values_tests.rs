@@ -599,12 +599,12 @@ Resources:
 /// The document with those two blocks in it fails this assertion against `values.rs` as it stood then,
 /// which is measured, and each of the two was measured diverging on its own through `guard test`.
 ///
-/// Three spellings are deliberately NOT in the document below, because the two loaders genuinely read
-/// them differently and no change here can make them agree:
-/// `a_spelling_the_two_loaders_read_differently` pins each one's two readings instead, so a change to
-/// either side fails, while this test keeps asserting agreement on everything else. Moving them here
-/// rather than deleting them is the point -- an agreement claim that quietly excluded them would be
-/// weaker than one that names them.
+/// Three spellings are deliberately NOT in `AGREEMENT_DOCUMENT`, because the two loaders genuinely
+/// read them differently and no change here can make them agree:
+/// `the_spellings_the_two_loaders_read_differently` pins each one's two readings instead and asserts
+/// that each is absent from that document, so a change to either side fails while this test keeps
+/// asserting agreement on everything else. Moving them there rather than deleting them is the point --
+/// an agreement claim that quietly excluded them would be weaker than one that names them.
 #[test]
 fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
     let document = AGREEMENT_DOCUMENT;
@@ -619,6 +619,23 @@ fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
         serde_json_value, libyaml_json,
         "the two loaders read the same bytes as different values, so which command read a file \
          decides what it means"
+    );
+
+    // The document's own size, asserted so it cannot shrink unnoticed. Deleting a line from it makes
+    // this test cover less while still passing, which is the one direction the divergence bookkeeping
+    // in `the_spellings_the_two_loaders_read_differently` cannot see: that test only checks that the
+    // three excluded spellings are *absent*, so a fourth spelling quietly removed from here and listed
+    // nowhere leaves every assertion green. Counted from the string at run time rather than declared
+    // as a length, so the number moves when the document does.
+    let asserted_values = AGREEMENT_DOCUMENT
+        .lines()
+        .filter_map(|line| line.split_once(": "))
+        .filter(|(_, value)| !value.trim().is_empty())
+        .count();
+    assert_eq!(
+        40, asserted_values,
+        "the agreement document lost a value; a spelling removed from it is only covered if it is \
+         listed as a divergence, so restore it or add it to DIVERGENT"
     );
 
     Ok(())
