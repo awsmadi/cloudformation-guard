@@ -879,8 +879,14 @@ enum IntScalar {
 
 /// Integer resolution for a plain scalar: the YAML 1.2 core schema
 /// (<https://yaml.org/spec/1.2.2/#103-core-schema>), which is `[-+]?[0-9]+` decimal, `0o[0-7]+`
-/// octal and `0x[0-9a-fA-F]+` hex, with one deliberate departure from it, and two divergences from
-/// `serde_yaml`, all noted below.
+/// octal and `0x[0-9a-fA-F]+` hex, with a deliberate departure from it noted below.
+///
+/// It also reads some spellings differently from `serde_yaml`. Each such arm says so, and `DIVERGENT`
+/// in `values_tests` names them, pins both readings of each, and asserts its own size. No count of them
+/// is written here on purpose: a number in this paragraph is a second copy of that table's contents
+/// that nothing checks, and this paragraph has already carried a count that the arms below had made
+/// wrong -- badly enough that it once offered `0755` as a point of *agreement* with `serde_yaml`, in the
+/// function that decides they disagree.
 ///
 /// This was `str::parse::<i64>`, which takes an optional sign and decimal digits and nothing else.
 /// So no radix prefix resolved as a number at all -- `0x1F` and `0o17` were strings, and a rule
@@ -905,7 +911,7 @@ enum IntScalar {
 /// pins both readings.
 ///
 /// The prefixes are lowercase only, which is 1.2 core's regex exactly and what `serde_yaml` does:
-/// `0X1F` and `0O17` are strings. The other divergence from `serde_yaml` is left standing on purpose:
+/// `0X1F` and `0O17` are strings. A further divergence from `serde_yaml` is left standing on purpose:
 /// `0b101` is a string here and an integer there. YAML 1.2 core has no binary form -- it is 1.1's --
 /// and following the extension would mean re-adding a 1.1-ism of exactly the kind the boolean set
 /// dropped.

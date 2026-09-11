@@ -599,12 +599,14 @@ Resources:
 /// The document with those two blocks in it fails this assertion against `values.rs` as it stood then,
 /// which is measured, and each of the two was measured diverging on its own through `guard test`.
 ///
-/// Three spellings are deliberately NOT in `AGREEMENT_DOCUMENT`, because the two loaders genuinely
-/// read them differently and no change here can make them agree:
-/// `the_spellings_the_two_loaders_read_differently` pins each one's two readings instead and asserts
-/// that each is absent from that document, so a change to either side fails while this test keeps
-/// asserting agreement on everything else. Moving them there rather than deleting them is the point --
-/// an agreement claim that quietly excluded them would be weaker than one that names them.
+/// The spellings deliberately NOT in `AGREEMENT_DOCUMENT` are the ones the two loaders read
+/// differently and that no change here can make agree. `the_spellings_the_two_loaders_read_differently`
+/// holds
+/// them in `DIVERGENT`, pins each one's two readings, and asserts that each is absent from this
+/// document, so a change to either side fails while this test keeps asserting agreement on everything
+/// else. How many there are is asserted there too, against the table, rather than counted here where
+/// nothing would read it. Moving them there rather than deleting them is the point -- an agreement
+/// claim that quietly excluded them would be weaker than one that names them.
 #[test]
 fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
     let document = AGREEMENT_DOCUMENT;
@@ -624,9 +626,9 @@ fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
     // The document's own size, asserted so it cannot shrink unnoticed. Deleting a line from it makes
     // this test cover less while still passing, which is the one direction the divergence bookkeeping
     // in `the_spellings_the_two_loaders_read_differently` cannot see: that test only checks that the
-    // three excluded spellings are *absent*, so a fourth spelling quietly removed from here and listed
-    // nowhere leaves every assertion green. Counted from the string at run time rather than declared
-    // as a length, so the number moves when the document does.
+    // excluded spellings are *absent*, so a spelling quietly removed from here and listed nowhere
+    // leaves every assertion green. Counted from the string at run time rather than declared as a
+    // length, so the number moves when the document does.
     let asserted_values = AGREEMENT_DOCUMENT
         .lines()
         .filter_map(|line| line.split_once(": "))
@@ -651,9 +653,16 @@ fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
 /// compares two compile-time constants, so it only ever fired for an edit that grew the array *and* its
 /// declared length, which is the direction already being done deliberately.
 ///
+/// A slice rather than a `[_; N]` for that same reason. A fixed-size array declares its length beside
+/// its rows, so any assertion over that length compares two constants and cannot move; a slice's length
+/// comes from its contents, so the size assertion in the test below fails when a row is added or
+/// dropped. Removal is the direction nothing else sees: delete a row and every remaining assertion
+/// still passes while one divergence is no longer pinned anywhere, which is what the same guard over
+/// `AGREEMENT_DOCUMENT` catches for the other table.
+///
 /// The cost of one table is the `rstest` case names, which named each spelling in the output. Every
 /// assertion below carries the scalar in its message instead.
-const DIVERGENT: [(&str, &str, &str); 3] = [
+const DIVERGENT: &[(&str, &str, &str)] = &[
     ("0755", "755", "0755"),
     (
         "0xFFFFFFFFFFFFFFFF",
@@ -699,13 +708,32 @@ const DIVERGENT: [(&str, &str, &str); 3] = [
 /// including one nobody has seen. That is not what happened. It still compares whole documents
 /// exactly, so a spelling that starts diverging fails it.
 ///
-/// What changed is which spellings are in its input, and the three that came out are pinned here with
-/// both of their readings. A case that starts agreeing fails the `assert_ne!`, and a spelling listed
-/// here that is *also* still a value in the agreement document fails the exclusion assertion -- which
-/// is the check that makes the exclusion bookkeeping hold in both directions rather than one.
+/// What changed is which spellings are in its input, and the ones that came out are pinned here with
+/// both of their readings. A case that starts agreeing fails the `assert_ne!`, a spelling listed here
+/// that is *also* still a value in the agreement document fails the exclusion assertion, and a row
+/// added or dropped fails the size assertion -- together those make the exclusion bookkeeping hold in
+/// every direction rather than one.
 #[test]
 fn the_spellings_the_two_loaders_read_differently() -> Result<()> {
-    for (scalar, expected_libyaml, expected_serde) in DIVERGENT {
+    // The table's own size, asserted so a row cannot leave or arrive unnoticed. This is the number
+    // `resolve_int`'s contract used to state in prose, moved to the one place that computes it: a count
+    // written beside a table it does not read is a second copy of that table's contents, and that copy
+    // has already been wrong -- `resolve_int` named a total its own arms had moved past, and nothing
+    // failed. Removal is the direction the per-row assertions below cannot see -- delete a row and they
+    // all still pass, one divergence simply stops being pinned -- which is the same hole the value count
+    // in `both_loaders_resolve_the_same_document_to_the_same_value` closes for its document.
+    //
+    // Honest only because `DIVERGENT` is a slice: on a `[_; N]` the length is declared beside the rows,
+    // so this would compare two compile-time constants and fire for no edit that was not already
+    // deliberate, which is precisely the guard this test replaced.
+    assert_eq!(
+        3,
+        DIVERGENT.len(),
+        "the divergence table changed size; a spelling added needs both of its readings and its \
+         exclusion from the agreement document checked, and one removed is no longer pinned at all"
+    );
+
+    for &(scalar, expected_libyaml, expected_serde) in DIVERGENT {
         let document = format!("probe: {scalar}\n");
 
         let via_libyaml = PathAwareValue::try_from(crate::rules::values::read_from(&document)?)?;
