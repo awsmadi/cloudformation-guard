@@ -43,9 +43,11 @@ tag_format = "$version"
 # the single thing that decides a version, instead of adding a second place that
 # has to be kept in step with it.
 #
-# `cz bump` is therefore not wired into CI. `cz bump --dry-run` is still useful
-# locally: it reports the version the commits since the last tag imply, which is
-# a reasonable way to choose the input to give the release workflow.
+# `cz bump` is therefore not wired into CI, and `cz bump --dry-run` is not a way
+# to choose the version to hand it either. Squash merges leave the release tags
+# off `main`'s ancestry, so commitizen reads a stale current version and derives
+# the increment from commits that already shipped: it reports a wrong version and
+# exits 0 doing it. CONTRIBUTING.md has the mechanism and the manual procedure.
 version_provider = "scm"
 
 # Conventional Commits became the practice here partway through the project's
