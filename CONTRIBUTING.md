@@ -66,6 +66,12 @@ The accepted types are `build`, `bump`, `chore`, `ci`, `docs`, `feat`, `fix`, `p
 is what CI checks; the individual commits on your branch are not checked, so you are free to commit however
 suits you while you work.
 
+One title shape fails the check in a way you might not expect. GitHub's revert button proposes
+`Revert "<original title>"`, which is not a Conventional Commits subject and is rejected. Retitle it to
+`revert: <what you are reverting>`; `revert` is one of the accepted types. `Revert` titles are not exempted,
+because commitizen's prefix exemption is a plain `startswith` — exempting the revert button's output would
+also exempt every other title beginning with those letters, unchecked.
+
 [commitizen](https://commitizen-tools.github.io/commitizen/) is configured to help with both writing and
 checking messages:
 

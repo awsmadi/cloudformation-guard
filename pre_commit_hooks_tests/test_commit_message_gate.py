@@ -7,7 +7,14 @@ command's defaults let a title through without its format being checked at all. 
 skips the Conventional Commits regex outright for a message beginning with one of its default
 allowed prefixes -- Merge, Revert, Pull request, fixup!, squash!, amend! -- and `--allow-abort`
 accepts an empty message, which is what `# invalid title` reduces to once git comment lines are
-stripped. Both were measured: with the defaults in place all three of the titles below passed.
+stripped.
+
+Both were measured against the command as first written, `cz check --allow-abort
+--commit-msg-file F`: seven of the eight titles below passed it, everything except the plain
+unconventional control. The two fixes are independent, and each closes only its own half.
+Emptying the prefix list closes the six prefix titles and does nothing for `# invalid title`;
+dropping `--allow-abort` closes `# invalid title` and does nothing for the six. Both flags are
+therefore load-bearing, which is why each bypass has its own case here.
 
 Since the title becomes the squash commit on main, a flag quietly dropped from that command
 reopens the bypass with nothing failing. These tests are what fail instead.
@@ -35,7 +42,18 @@ REJECTED = [
     # The `Merge` and `Revert` default prefixes. Those exist for messages git itself writes
     # during a merge or a rebase, which a pull request title is not.
     ("Merge pull request #1 from nonsense", "Merge default prefix"),
-    ("Revert whatever I feel like, unformatted", "Revert default prefix"),
+    # The `Revert` case uses the shape GitHub's revert button actually produces, because that is
+    # the one closed bypass whose closure costs a contributor anything: they get a red check and
+    # have to retitle. Two commits reached main this way -- `Revert "Bumping up clap-rs (#294)"
+    # (#299)` and `Revert "Filter as skips (#38)" (#39)` -- against 641 commits of history, with
+    # no conventional `revert:` commit at all.
+    #
+    # Rejecting it is still right, and not for tidiness. `--allowed-prefixes Revert` cannot be
+    # narrowed to that shape: commitizen matches with `commit_msg.startswith(prefix)`, so such an
+    # allowance also exempts `Reverted the thing, no type at all` from the regex entirely. Both
+    # were measured. `revert:` is an accepted type here and is in ACCEPTED below, so the fix for
+    # a revert-button title is one retitle.
+    ('Revert "fix: keep the digits above i64::MAX"', "Revert default prefix"),
     ("Pull request: nothing conventional here", "Pull request default prefix"),
     ("fixup! not a real type", "fixup! default prefix"),
     ("squash! not a real type", "squash! default prefix"),
@@ -57,6 +75,10 @@ ACCEPTED = [
     "fix(values): keep the digits above i64::MAX",
     "feat!: a breaking change",
     "docs: a note",
+    # The conventional form of a revert. CONTRIBUTING.md tells contributors to retitle a
+    # revert-button pull request to this, so it has to keep working -- otherwise that advice goes
+    # stale with nothing failing.
+    "revert: keep the digits above i64::MAX",
 ]
 
 
