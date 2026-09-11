@@ -1,3 +1,0 @@
-rule paired_rule {
-    Resources.One.Type == "AWS::S3::Bucket"
-}

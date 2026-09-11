@@ -1,3 +1,0 @@
-rule s3_rule_that_passes {
-    Resources.One.Type == "AWS::S3::Bucket"
-}

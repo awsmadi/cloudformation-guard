@@ -1,8 +1,0 @@
-- name: suite for paired
-  input:
-    Resources:
-      One:
-        Type: AWS::S3::Bucket
-  expectations:
-    rules:
-      paired_rule: PASS

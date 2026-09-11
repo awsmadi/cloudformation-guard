@@ -1,3 +1,0 @@
-rule s3_encryption_rule {
-    Resources.One.Properties.Encrypted == true
-}
