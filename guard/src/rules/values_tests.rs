@@ -567,7 +567,10 @@ Resources:
 /// **Closable, and left open with a reason.**
 ///
 ///   - `0b101`. YAML 1.2 core has no binary form -- it is 1.1's -- so following `serde_yaml`'s
-///     extension would re-add a 1.1-ism the boolean set dropped. A choice, not a limit.
+///     extension would re-add a 1.1-ism the boolean set dropped. A choice, not a limit, and pinned in
+///     `DIVERGENT` with both of its readings rather than only described here. A divergence held open
+///     deliberately still has to fail something when it closes: accepting binary makes the two loaders
+///     agree on `0b101`, which trips the `assert_ne!` over the table and names the row to move.
 ///
 /// **Not closable at this boundary.** `serde_yaml::Value` is a *resolved* value model: it has already
 /// discarded how each scalar was written, and anchors with it, before this conversion sees anything. So
@@ -600,8 +603,7 @@ Resources:
 /// which is measured, and each of the two was measured diverging on its own through `guard test`.
 ///
 /// The spellings deliberately NOT in `AGREEMENT_DOCUMENT` are the ones the two loaders read
-/// differently and that no change here can make agree. `the_spellings_the_two_loaders_read_differently`
-/// holds
+/// differently, whether by limit or by choice. `the_spellings_the_two_loaders_read_differently` holds
 /// them in `DIVERGENT`, pins each one's two readings, and asserts that each is absent from this
 /// document, so a change to either side fails while this test keeps asserting agreement on everything
 /// else. How many there are is asserted there too, against the table, rather than counted here where
@@ -664,6 +666,7 @@ fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
 /// assertion below carries the scalar in its message instead.
 const DIVERGENT: &[(&str, &str, &str)] = &[
     ("0755", "755", "0755"),
+    ("0b101", "0b101", "5"),
     (
         "0xFFFFFFFFFFFFFFFF",
         "0xFFFFFFFFFFFFFFFF",
@@ -679,9 +682,11 @@ const DIVERGENT: &[(&str, &str, &str)] = &[
 /// Each spelling excluded from the agreement document reads two ways, and is really excluded.
 ///
 /// These are left out of `both_loaders_resolve_the_same_document_to_the_same_value` because they do not
-/// agree and cannot be made to. Pinned here rather than dropped, so that a change to either side fails:
-/// the agreement test proves nothing about a case it does not contain, and a reader who found one of
-/// these missing from it would have no way to tell a deliberate exclusion from an oversight.
+/// agree. Most of them cannot be made to; `0b101` could be, and is not, which is why it is pinned here
+/// with the rest rather than left as a sentence somebody has to trust. Pinned rather than dropped, so
+/// that a change to either side fails: the agreement test proves nothing about a case it does not
+/// contain, and a reader who found one of these missing from it would have no way to tell a deliberate
+/// exclusion from an oversight.
 ///
 /// What each divergence is:
 ///
@@ -691,6 +696,13 @@ const DIVERGENT: &[(&str, &str, &str)] = &[
 ///     leading-zero decimal, so it yields the string. Choosing this loader's own reading is what stops
 ///     a numeric `when` condition over a file mode from failing to apply; the cost is this divergence,
 ///     which predates the choice -- `serde_yaml` and `parse::<i64>` never agreed on these characters.
+///   - `0b101`. YAML 1.2 core has no binary form -- it is 1.1's -- so this loader leaves the characters
+///     as text, and `serde_yaml`, which carries the 1.1 extension, resolves them to 5. A choice rather
+///     than a limit, unlike the others here: accepting binary would re-add a 1.1-ism of exactly the kind
+///     that cutting the boolean set from 22 spellings to 6 removed. Both readings are pinned anyway,
+///     because a choice nothing checks is indistinguishable from an oversight, and because the row is
+///     what reports the choice being reversed -- the `assert_ne!` below fails the moment the two loaders
+///     agree on it.
 ///   - `0xFFFFFFFFFFFFFFFF` and `+18446744073709551615`. Both are integers above `i64::MAX`. The
 ///     libyaml loader keeps the literal source text, so the hex spelling stays hex and the signed
 ///     spelling keeps its `+`. `serde_yaml` resolves each to a `u64` first and the conversion then
@@ -727,7 +739,7 @@ fn the_spellings_the_two_loaders_read_differently() -> Result<()> {
     // so this would compare two compile-time constants and fire for no edit that was not already
     // deliberate, which is precisely the guard this test replaced.
     assert_eq!(
-        3,
+        4,
         DIVERGENT.len(),
         "the divergence table changed size; a spelling added needs both of its readings and its \
          exclusion from the agreement document checked, and one removed is no longer pinned at all"

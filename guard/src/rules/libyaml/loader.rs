@@ -911,10 +911,12 @@ enum IntScalar {
 /// pins both readings.
 ///
 /// The prefixes are lowercase only, which is 1.2 core's regex exactly and what `serde_yaml` does:
-/// `0X1F` and `0O17` are strings. A further divergence from `serde_yaml` is left standing on purpose:
-/// `0b101` is a string here and an integer there. YAML 1.2 core has no binary form -- it is 1.1's --
-/// and following the extension would mean re-adding a 1.1-ism of exactly the kind the boolean set
-/// dropped.
+/// `0X1F` and `0O17` are strings. Binary is left standing as a divergence on purpose: `0b101` is a
+/// string here and the integer 5 there. YAML 1.2 core has no binary form -- it is 1.1's -- and
+/// following the extension would mean re-adding a 1.1-ism of exactly the kind the boolean set dropped.
+/// Both of those readings are pinned in `DIVERGENT`, so reversing the choice fails a test instead of
+/// passing quietly. The loader side is pinned a second time, closer to home, at `case::binary` in
+/// `an_integer_resolves_by_the_1_2_core_forms`.
 fn resolve_int(val: &str) -> IntScalar {
     let (negative, magnitude) = match val.strip_prefix('-') {
         Some(rest) => (true, rest),
