@@ -879,7 +879,8 @@ enum IntScalar {
 
 /// Integer resolution for a plain scalar: the YAML 1.2 core schema
 /// (<https://yaml.org/spec/1.2.2/#103-core-schema>), which is `[-+]?[0-9]+` decimal, `0o[0-7]+`
-/// octal and `0x[0-9a-fA-F]+` hex, with two deliberate departures noted below.
+/// octal and `0x[0-9a-fA-F]+` hex, with one deliberate departure from it, and two divergences from
+/// `serde_yaml`, all noted below.
 ///
 /// This was `str::parse::<i64>`, which takes an optional sign and decimal digits and nothing else.
 /// So no radix prefix resolved as a number at all -- `0x1F` and `0o17` were strings, and a rule
@@ -891,15 +892,20 @@ enum IntScalar {
 /// loader `guard test` and `run_checks` reach on the same bytes -- resolves it too, so accepting it
 /// removes a divergence and cannot introduce a wrong value.
 ///
-/// **A decimal integer with a redundant leading zero stays a string**, so `0755` is the text "0755".
-/// This is the one spelling where the two YAML versions assign *different values* to the same
-/// characters: 1.1 reads it as octal 493 (<https://yaml.org/type/int.html>), 1.2 core's decimal
-/// regex reads it as 755. A file mode or a netmask written `0755` almost certainly means 493, so
-/// resolving it either way silently produces a number the author did not write; keeping the literal
-/// is the only answer that cannot be quietly wrong, and it is also what `serde_yaml` does.
+/// **A decimal integer with a redundant leading zero resolves as decimal**, so `0755` is 755. This is
+/// the one spelling where the two YAML versions assign *different values* to the same characters: 1.1
+/// reads it as octal 493 (<https://yaml.org/type/int.html>), 1.2 core's decimal regex reads it as 755,
+/// and this loader takes 1.2's -- which is also what `str::parse::<i64>` gave these characters before
+/// this function existed. Refusing to resolve it was the earlier answer here and is not used: an
+/// unresolved scalar becomes a `String`, and that disarms a numeric `when` gate silently. The argument
+/// is recorded in full at the arm that decides it.
+///
+/// That makes it a divergence from `serde_yaml`, which yields the string for these characters. It is
+/// not closable from this side, and `the_spellings_the_two_loaders_read_differently` in `values_tests`
+/// pins both readings.
 ///
 /// The prefixes are lowercase only, which is 1.2 core's regex exactly and what `serde_yaml` does:
-/// `0X1F` and `0O17` are strings. One divergence from `serde_yaml` is left standing on purpose:
+/// `0X1F` and `0O17` are strings. The other divergence from `serde_yaml` is left standing on purpose:
 /// `0b101` is a string here and an integer there. YAML 1.2 core has no binary form -- it is 1.1's --
 /// and following the extension would mean re-adding a 1.1-ism of exactly the kind the boolean set
 /// dropped.
