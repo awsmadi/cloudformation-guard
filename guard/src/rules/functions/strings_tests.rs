@@ -372,13 +372,23 @@ fn json_parse_refuses_a_duplicate_member_name() {
     );
 }
 
-/// `json_parse` still reads an integer above `i64::MAX` as its digits, not as a negative.
+/// `json_parse` reads an integer above `i64::MAX` as its digits, not as a negative.
 ///
-/// The second pin on the parser. `serde_json` routes to `TryFrom<&serde_json::Value>`, whose `is_u64`
-/// arm is still `num.as_u64().unwrap() as i64` -- the bit-pattern reinterpretation that reads
-/// `18446744073709551615` as exactly `-1`, inverting every numeric guard at exit 0. That is the sign
-/// flip the `serde_yaml` arm in `values.rs` was fixed for, and the literal is valid JSON, so the swap
-/// would reintroduce it here.
+/// The second pin on the parser, and the reason it gives has expired. It used to be that
+/// `TryFrom<&serde_json::Value>`'s `is_u64` arm was still `num.as_u64().unwrap() as i64` -- the
+/// bit-pattern reinterpretation reading `18446744073709551615` as exactly `-1`, inverting every
+/// numeric guard at exit 0 -- so swapping the parser for `serde_json` would have reintroduced the
+/// sign flip the `serde_yaml` arm had been fixed for. That arm keeps the digits now as well, so the
+/// swap would not reintroduce it and this case no longer argues against the swap. The first and
+/// third pins still do, and they are the two reasons `Value::try_from_json`'s comment now gives.
+///
+/// What it pins instead is the reading through `json_parse`'s path. `json_parse` converts with
+/// `Value::try_from_json`, so it shares `convert_yaml`'s `is_u64` arm with the
+/// `TryFrom<&serde_yaml::Value>` entry point `values_tests.rs` covers, and reverting that arm fails
+/// both -- measured. The two are not the same cell, though: that one stops at a `Value`, and this
+/// one carries on through the `PathAwareValue::try_from` `json_parse` calls next, so it asserts
+/// the `PathAwareValue` a clause is evaluated against. This is the case that says a wide integer
+/// survives the whole of what `json_parse` does to it, digits included.
 #[test]
 fn json_parse_reads_an_integer_wider_than_i64_as_digits() -> crate::rules::Result<()> {
     let parsed = json_parse_embedded(r#"{"v": 18446744073709551615}"#)?;
