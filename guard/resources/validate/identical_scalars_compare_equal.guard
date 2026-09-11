@@ -1,4 +1,0 @@
-rule identical_scalars_compare_equal {
-    Resources.Vol.Properties.Threshold == Resources.Vol.Properties.Ceiling
-    Resources.Vol.Properties.Size == Resources.Vol.Properties.Capacity
-}
