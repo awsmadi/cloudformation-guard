@@ -486,6 +486,63 @@ Resources:
     Ok(())
 }
 
+/// The document `both_loaders_resolve_the_same_document_to_the_same_value` asserts agreement on.
+///
+/// A `const` rather than a local so `the_spellings_the_two_loaders_read_differently` can check that
+/// none of the divergent spellings is in it. Without that check, a spelling could be taken out of
+/// this document and added to the exclusion list in one commit and nothing would fail, which is the
+/// half of the exclusion bookkeeping neither test used to cover.
+const AGREEMENT_DOCUMENT: &str = r#"
+Mappings:
+  NonStringKeys:
+    123456789012: an account id
+    0x1F: a bitmask
+    1.0: a whole float
+    2.5: a fractional float
+    true: a boolean
+    18446744073709551615: past i64
+    .nan: not a number
+Resources:
+  Probe:
+    Merged:
+      <<: { from_merge: yes_really, overridden: from_merge }
+      overridden: explicit
+    MergedSequence:
+      <<: [{ a: first, shared: from_first }, { b: second, shared: from_second }]
+    Properties:
+      bool_true: true
+      bool_TRUE: TRUE
+      bool_mixed: tRuE
+      not_a_bool_yes: yes
+      not_a_bool_n: N
+      not_a_bool_off: off
+      hex: 0x1F
+      octal: 0o17
+      plain_int: 42
+      signed_int: +42
+      i64_max: 9223372036854775807
+      float: 1.5
+      exponent: 1e5
+      time: 12:30:45
+      sexagesimal: 1:30
+      underscored: 1_000
+      empty_node:
+      quoted_empty: ""
+      tilde: ~
+      spelled_null: null
+      u64_max: 18446744073709551615
+      just_past_i64_max: 9223372036854775808
+      not_a_number: .nan
+      infinity: .inf
+      negative_infinity: -.inf
+      getatt_dotted: !GetAtt Other.Arn
+      getatt_multi_dot: !GetAtt myELB.SourceSecurityGroup.OwnerAlias
+      getatt_list: !GetAtt [Other, Arn]
+      ref: !Ref Param
+      unlisted_intrinsic: !Length [1, 2, 3]
+      tagged_mapping: !ToJsonString { a: 1 }
+"#;
+
 /// cfn-guard has two document loaders, and they must give the same document the same value.
 ///
 /// `values::read_from` -- the libyaml loader -- is reached only by `validate`'s `build_data_file`.
@@ -550,56 +607,7 @@ Resources:
 /// weaker than one that names them.
 #[test]
 fn both_loaders_resolve_the_same_document_to_the_same_value() -> Result<()> {
-    let document = r#"
-Mappings:
-  NonStringKeys:
-    123456789012: an account id
-    0x1F: a bitmask
-    1.0: a whole float
-    2.5: a fractional float
-    true: a boolean
-    18446744073709551615: past i64
-    .nan: not a number
-Resources:
-  Probe:
-    Merged:
-      <<: { from_merge: yes_really, overridden: from_merge }
-      overridden: explicit
-    MergedSequence:
-      <<: [{ a: first, shared: from_first }, { b: second, shared: from_second }]
-    Properties:
-      bool_true: true
-      bool_TRUE: TRUE
-      bool_mixed: tRuE
-      not_a_bool_yes: yes
-      not_a_bool_n: N
-      not_a_bool_off: off
-      hex: 0x1F
-      octal: 0o17
-      plain_int: 42
-      signed_int: +42
-      i64_max: 9223372036854775807
-      float: 1.5
-      exponent: 1e5
-      time: 12:30:45
-      sexagesimal: 1:30
-      underscored: 1_000
-      empty_node:
-      quoted_empty: ""
-      tilde: ~
-      spelled_null: null
-      u64_max: 18446744073709551615
-      just_past_i64_max: 9223372036854775808
-      not_a_number: .nan
-      infinity: .inf
-      negative_infinity: -.inf
-      getatt_dotted: !GetAtt Other.Arn
-      getatt_multi_dot: !GetAtt myELB.SourceSecurityGroup.OwnerAlias
-      getatt_list: !GetAtt [Other, Arn]
-      ref: !Ref Param
-      unlisted_intrinsic: !Length [1, 2, 3]
-      tagged_mapping: !ToJsonString { a: 1 }
-"#;
+    let document = AGREEMENT_DOCUMENT;
 
     let via_libyaml = PathAwareValue::try_from(crate::rules::values::read_from(document)?)?;
     let via_serde = PathAwareValue::try_from(serde_yaml::from_str::<serde_yaml::Value>(document)?)?;
@@ -616,12 +624,38 @@ Resources:
     Ok(())
 }
 
-/// The spellings the two loaders read differently, with both readings pinned.
+/// The spellings the two loaders read differently, with each one's two readings.
 ///
-/// These are excluded from `both_loaders_resolve_the_same_document_to_the_same_value` because they do
-/// not agree and cannot be made to. Pinned here rather than dropped, so that a change to either side
-/// fails: the agreement test proves nothing about a case it does not contain, and a reader who found
-/// one of these missing from it would have no way to tell a deliberate exclusion from an oversight.
+/// `(scalar, the libyaml loader's reading, the serde reading)`. One table, read by one test. It used to
+/// be an `rstest` carrying its own three spellings beside a separate `DIVERGENT` array in a second
+/// test, and nothing tied the two together: measured, a fourth case added to the `rstest` and left out
+/// of the array kept the whole suite green, which is the quiet growth the pair was written to prevent.
+/// The array's `assert_eq!(3, DIVERGENT.len())` could not catch it either -- on a fixed-size array that
+/// compares two compile-time constants, so it only ever fired for an edit that grew the array *and* its
+/// declared length, which is the direction already being done deliberately.
+///
+/// The cost of one table is the `rstest` case names, which named each spelling in the output. Every
+/// assertion below carries the scalar in its message instead.
+const DIVERGENT: [(&str, &str, &str); 3] = [
+    ("0755", "755", "0755"),
+    (
+        "0xFFFFFFFFFFFFFFFF",
+        "0xFFFFFFFFFFFFFFFF",
+        "18446744073709551615",
+    ),
+    (
+        "+18446744073709551615",
+        "+18446744073709551615",
+        "18446744073709551615",
+    ),
+];
+
+/// Each spelling excluded from the agreement document reads two ways, and is really excluded.
+///
+/// These are left out of `both_loaders_resolve_the_same_document_to_the_same_value` because they do not
+/// agree and cannot be made to. Pinned here rather than dropped, so that a change to either side fails:
+/// the agreement test proves nothing about a case it does not contain, and a reader who found one of
+/// these missing from it would have no way to tell a deliberate exclusion from an oversight.
 ///
 /// What each divergence is:
 ///
@@ -649,103 +683,61 @@ Resources:
 /// exactly, so a spelling that starts diverging fails it.
 ///
 /// What changed is which spellings are in its input, and the three that came out are pinned here with
-/// both of their readings, so a change to either side fails and a case that starts agreeing fails the
-/// `assert_ne!` below. The set is closed by
-/// `the_known_loader_divergences_are_exactly_these_three`: adding a fourth spelling here without
-/// adding it there fails, which is what stops this list absorbing a new divergence quietly.
-#[rstest::rstest]
-#[case::leading_zero_decimal("0755", "755", "0755")]
-#[case::wide_hex("0xFFFFFFFFFFFFFFFF", "0xFFFFFFFFFFFFFFFF", "18446744073709551615")]
-#[case::wide_leading_plus(
-    "+18446744073709551615",
-    "+18446744073709551615",
-    "18446744073709551615"
-)]
-fn a_spelling_the_two_loaders_read_differently(
-    #[case] scalar: &str,
-    #[case] expected_libyaml: &str,
-    #[case] expected_serde: &str,
-) -> Result<()> {
-    let document = format!("probe: {scalar}\n");
-
-    let via_libyaml = PathAwareValue::try_from(crate::rules::values::read_from(&document)?)?;
-    let via_serde =
-        PathAwareValue::try_from(serde_yaml::from_str::<serde_yaml::Value>(&document)?)?;
-
-    let (_, libyaml_json): (String, serde_json::Value) = (&via_libyaml).try_into()?;
-    let (_, serde_json_value): (String, serde_json::Value) = (&via_serde).try_into()?;
-
-    let rendered = |value: &serde_json::Value| -> String {
-        match value.get("probe").expect("the key is present") {
-            serde_json::Value::String(s) => s.clone(),
-            other => other.to_string(),
-        }
-    };
-
-    assert_eq!(
-        expected_libyaml,
-        rendered(&libyaml_json),
-        "the libyaml loader's reading of `{scalar}` changed"
-    );
-    assert_eq!(
-        expected_serde,
-        rendered(&serde_json_value),
-        "the serde reading of `{scalar}` changed"
-    );
-    assert_ne!(
-        rendered(&libyaml_json),
-        rendered(&serde_json_value),
-        "`{scalar}` now reads the same through both loaders, so it belongs in \
-         both_loaders_resolve_the_same_document_to_the_same_value rather than here"
-    );
-
-    Ok(())
-}
-
-/// The spellings excluded from the agreement document are exactly these three.
-///
-/// This is what closes the set. Without it, `a_spelling_the_two_loaders_read_differently` could take a
-/// fourth case and the agreement test could lose a fourth spelling from its document, and both would
-/// stay green -- the exclusion list growing quietly, which is the failure mode that makes an
-/// exclusion list worse than no exclusion at all.
-///
-/// Held as a list here rather than counted from the `rstest` cases, because a case attribute is
-/// compile-time and cannot be enumerated at run time. Adding a case above without adding its spelling
-/// here fails on the count, and adding it here without a case fails on the assertion that each one
-/// actually diverges.
+/// both of their readings. A case that starts agreeing fails the `assert_ne!`, and a spelling listed
+/// here that is *also* still a value in the agreement document fails the exclusion assertion -- which
+/// is the check that makes the exclusion bookkeeping hold in both directions rather than one.
 #[test]
-fn the_known_loader_divergences_are_exactly_these_three() {
-    const DIVERGENT: [&str; 3] = ["0755", "0xFFFFFFFFFFFFFFFF", "+18446744073709551615"];
-
-    assert_eq!(
-        3,
-        DIVERGENT.len(),
-        "the set of spellings the two loaders read differently is closed at three; a new one is a \
-         new divergence and needs its own case and its own reason, not an extra entry here"
-    );
-
-    for scalar in DIVERGENT {
+fn the_spellings_the_two_loaders_read_differently() -> Result<()> {
+    for (scalar, expected_libyaml, expected_serde) in DIVERGENT {
         let document = format!("probe: {scalar}\n");
-        let via_libyaml = PathAwareValue::try_from(
-            crate::rules::values::read_from(&document).expect("the libyaml loader reads it"),
-        )
-        .expect("the conversion succeeds");
-        let via_serde = PathAwareValue::try_from(
-            serde_yaml::from_str::<serde_yaml::Value>(&document).expect("serde reads it"),
-        )
-        .expect("the conversion succeeds");
 
-        let (_, libyaml_json): (String, serde_json::Value) =
-            (&via_libyaml).try_into().expect("it serializes");
-        let (_, serde_json_value): (String, serde_json::Value) =
-            (&via_serde).try_into().expect("it serializes");
+        let via_libyaml = PathAwareValue::try_from(crate::rules::values::read_from(&document)?)?;
+        let via_serde =
+            PathAwareValue::try_from(serde_yaml::from_str::<serde_yaml::Value>(&document)?)?;
 
+        let (_, libyaml_json): (String, serde_json::Value) = (&via_libyaml).try_into()?;
+        let (_, serde_json_value): (String, serde_json::Value) = (&via_serde).try_into()?;
+
+        let rendered = |value: &serde_json::Value| -> String {
+            match value.get("probe").expect("the key is present") {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }
+        };
+
+        assert_eq!(
+            expected_libyaml,
+            rendered(&libyaml_json),
+            "the libyaml loader's reading of `{scalar}` changed"
+        );
+        assert_eq!(
+            expected_serde,
+            rendered(&serde_json_value),
+            "the serde reading of `{scalar}` changed"
+        );
         assert_ne!(
-            libyaml_json, serde_json_value,
-            "`{scalar}` is listed as divergent but the two loaders now agree on it, so it belongs \
-             back in the agreement document"
+            rendered(&libyaml_json),
+            rendered(&serde_json_value),
+            "`{scalar}` now reads the same through both loaders, so it belongs in \
+             both_loaders_resolve_the_same_document_to_the_same_value rather than here"
+        );
+
+        // Matched as a whole value after `": "` rather than as a substring, so that a spelling which
+        // merely occurs inside a longer scalar is not read as being in the document.
+        let still_in_agreement_document = AGREEMENT_DOCUMENT
+            .lines()
+            .filter_map(|line| line.split_once(": "))
+            .any(|(_, value)| value.trim() == scalar);
+        assert!(
+            !still_in_agreement_document,
+            "`{}` is pinned here as a divergence and is still a value in the agreement document, \
+             which asserts the two loaders agree on everything in it -- one of the two has to be \
+             wrong",
+            scalar
         );
     }
+
+    Ok(())
 }
 
 /// The serde-backed conversion does not read a positive integer as negative, and does not admit a
