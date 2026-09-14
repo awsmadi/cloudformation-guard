@@ -275,52 +275,18 @@ where
             }
         }
 
-        Err(err) => not_comparable_because(each_lhs, each_rhs, unanswerable_reason(err)),
-    }
-}
-
-/// Turns a comparator's error into the reason recorded against the clause.
-///
-/// Every way a comparator can fail means the same thing to the caller: this comparison has no
-/// answer. None of them is a reason to stop the run, so none of them may reach a panic. The arm
-/// that was missing was `RegexError`, and the catch-all that used to stand here was
-/// `unreachable!()`, so a rules file with one unevaluatable regex aborted the process at exit 101
-/// and took every other rule's verdict with it.
-///
-/// The two reachable variants today are `NotComparable`, from `compare_values` under all five
-/// comparators, and `RegexError`, from `compare_eq` alone. Anything else still reports rather than
-/// aborts, because a wrong-looking message beats no verdict at all.
-fn unanswerable_reason(err: Error) -> String {
-    match err {
-        Error::NotComparable(reason) => reason,
-
-        // `fancy_regex` returns a `Result` from `is_match` because its backtracking engine gives
-        // up rather than running forever: a pattern holding a lookaround or a backreference cannot
-        // use the linear automaton, and a nested quantifier then makes the number of paths to try
-        // grow with the length of the input. `/(?!zzz)(\w+\s?)+!/` against eighty characters that
-        // hold no `!` exceeds the limit, and the same pattern against fifteen does not, so a rule
-        // that passes review can still fail on a longer `UserData` or policy document.
-        //
-        // `fancy_regex`'s own message is reported rather than `RegexError`'s, which reads "Regex
-        // expression parse error" -- true of a pattern that would not compile, and misleading
-        // about one that compiled and then ran out of backtracking.
-        Error::RegexError(err) => {
-            format!("The regular expression could not be evaluated against the value: {err}")
+        Err(Error::NotComparable(reason)) => {
+            ValueEvalResult::ComparisonResult(ComparisonResult::NotComparable(NotComparable {
+                reason,
+                pair: LhsRhsPair {
+                    lhs: each_lhs,
+                    rhs: each_rhs,
+                },
+            }))
         }
 
-        rest => format!("The comparison could not be performed: {rest}"),
+        _ => unreachable!(),
     }
-}
-
-fn not_comparable_because(
-    lhs: Rc<PathAwareValue>,
-    rhs: Rc<PathAwareValue>,
-    reason: String,
-) -> ValueEvalResult {
-    ValueEvalResult::ComparisonResult(ComparisonResult::NotComparable(NotComparable {
-        reason,
-        pair: LhsRhsPair { lhs, rhs },
-    }))
 }
 
 fn is_literal(query_results: &[QueryResult]) -> Option<Rc<PathAwareValue>> {
