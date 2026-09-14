@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::Path;
 
 use crate::rules::exprs::RulesFile;
 use crate::rules::{NamedStatus, RecordType, Status};
@@ -89,22 +88,6 @@ pub(crate) fn unchecked_expectation_message(rules: &RulesFile<'_>, name: &str) -
     }
 
     format!("No rule named {name} is in this file, so its expectation was not checked")
-}
-
-/// One message per test file that no rules file claimed.
-///
-/// The mirror of the line the report already prints for a rules file with no test files. That one
-/// reads as benign, because a rules file legitimately may have no tests; a test file that nothing
-/// runs is what a rules file rename leaves behind, and nothing named it.
-///
-/// A message and not a failure, for the reason above plus one of its own: a `tests/` directory may
-/// hold a yaml or json file that is not a suite at all, and the walker cannot tell one from the
-/// other by name, so failing would break setups that work.
-pub(crate) fn unmatched_test_file_message(path: &Path) -> String {
-    format!(
-        "{} did not match any rules file, so it was not run",
-        path.display()
-    )
 }
 
 /// Write what a run collected. Sorted by the set, so two runs over the same input agree.

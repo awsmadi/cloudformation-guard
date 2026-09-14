@@ -2,9 +2,7 @@ use crate::commands::reporters::test::generic::GenericReporter;
 use crate::commands::reporters::test::structured::{
     ContextAwareRule, Err, StructuredTestReporter, TestResult,
 };
-use crate::commands::reporters::test::{
-    unmatched_test_file_message, write_diagnostics, Diagnostics,
-};
+use crate::commands::reporters::test::{write_diagnostics, Diagnostics};
 use crate::commands::reporters::JunitReport;
 use crate::commands::{
     Executable, SUCCESS_STATUS_CODE, TEST_ERROR_STATUS_CODE, TEST_FAILURE_STATUS_CODE,
@@ -146,18 +144,6 @@ impl Executable for Test {
             validate_path(dir)?;
             let walk = walkdir::WalkDir::new(dir);
             let ordered_directory = OrderedTestDirectory::from(walk);
-
-            // Before the report and on stderr, as the unchecked-expectation note is, and here rather
-            // than in either handler so that every output format says it. Read now because
-            // iterating the directory consumes it.
-            write_diagnostics(
-                &ordered_directory
-                    .orphaned_test_files
-                    .iter()
-                    .map(|path| unmatched_test_file_message(path))
-                    .collect(),
-                writer,
-            )?;
 
             match self.output_format {
                 OutputFormatType::SingleLineSummary => {
@@ -510,18 +496,11 @@ pub struct TestSpec {
     pub expectations: TestExpectations,
 }
 
-struct OrderedTestDirectory {
-    files: BTreeMap<String, Vec<GuardFile>>,
-    /// Test files under a `tests/` directory that no rules file took, in walk order.
-    ///
-    /// Read by the caller before it consumes the directory. Nothing named these before, so a test
-    /// file left behind by a rules file rename was discarded in silence.
-    orphaned_test_files: Vec<PathBuf>,
-}
+struct OrderedTestDirectory(BTreeMap<String, Vec<GuardFile>>);
 
 impl IntoIterator for OrderedTestDirectory {
     fn into_iter(self) -> Self::IntoIter {
-        self.files.into_iter()
+        self.0.into_iter()
     }
 
     type IntoIter = std::collections::btree_map::IntoIter<String, Vec<GuardFile>>;
@@ -532,7 +511,6 @@ impl From<walkdir::WalkDir> for OrderedTestDirectory {
     fn from(walk: walkdir::WalkDir) -> Self {
         let mut non_guard: Vec<DirEntry> = vec![];
         let mut files: BTreeMap<String, Vec<GuardFile>> = BTreeMap::new();
-        let mut orphaned_test_files: Vec<PathBuf> = vec![];
         for file in walk
             .follow_links(true)
             .sort_by_file_name()
@@ -585,31 +563,21 @@ impl From<walkdir::WalkDir> for OrderedTestDirectory {
                 let parent = file.path().parent();
 
                 if parent.map_or(false, |p| p.ends_with("tests")) {
-                    let candidates = parent.unwrap().parent().and_then(|grand| {
+                    if let Some(candidates) = parent.unwrap().parent().and_then(|grand| {
                         let grand = format!("{}", grand.display());
                         files.get_mut(&grand)
-                    });
-
-                    let claimed_by = candidates.and_then(|candidates| {
-                        candidates
-                            .iter_mut()
-                            .find(|guard_file| name.starts_with(&guard_file.prefix))
-                    });
-
-                    // Whether the file was taken is asked once, here, and both halves read the
-                    // answer. Deciding it a second time by repeating the prefix test would let the
-                    // two drift, and a file could then be both paired and reported as unpaired.
-                    match claimed_by {
-                        Some(guard_file) => guard_file.test_files.push(file),
-                        None => orphaned_test_files.push(file.path().to_path_buf()),
+                    }) {
+                        for guard_file in candidates {
+                            if name.starts_with(&guard_file.prefix) {
+                                guard_file.test_files.push(file);
+                                break;
+                            }
+                        }
                     }
                 }
             }
         }
 
-        OrderedTestDirectory {
-            files,
-            orphaned_test_files,
-        }
+        OrderedTestDirectory(files)
     }
 }
