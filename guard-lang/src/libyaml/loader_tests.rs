@@ -29,37 +29,74 @@ fn yaml_loader() -> Result<()> {
     Ok(())
 }
 
-/// The whole boolean set, which is the YAML 1.2 core schema's six spellings.
-///
-/// The assertion is unconditional: one that sat inside an `if let MarkedValue::Bool(..)` would let
-/// every spelling read as a string satisfy its case by never reaching it. YAML 1.1's `y`, `yes`,
-/// `on` and the rest of its 22 are strings here, and are asserted to be strings in
-/// `a_scalar_outside_the_boolean_set_is_still_a_string`.
 #[rstest::rstest]
 #[case::standard_lowercase_true("true", true)]
 #[case::standard_capitalized_true("True", true)]
 #[case::standard_uppercase_true("TRUE", true)]
+#[case::yaml_yes_lowercase("yes", true)]
+#[case::yaml_yes_capitalized("Yes", true)]
+#[case::yaml_yes_uppercase("YES", true)]
+#[case::yaml_on_lowercase("on", true)]
+#[case::yaml_on_capitalized("On", true)]
+#[case::yaml_on_uppercase("ON", true)]
+#[case::yaml_y_lowercase("y", true)]
+#[case::yaml_y_uppercase("Y", true)]
 #[case::standard_lowercase_false("false", false)]
 #[case::standard_capitalized_false("False", false)]
 #[case::standard_uppercase_false("FALSE", false)]
-fn test_handle_bool_happy_path(#[case] arg: &str, #[case] expected: bool) -> Result<()> {
+#[case::yaml_no_lowercase("no", false)]
+#[case::yaml_no_capitalized("No", false)]
+#[case::yaml_no_uppercase("NO", false)]
+#[case::yaml_off_lowercase("off", false)]
+#[case::yaml_off_capitalized("Off", false)]
+#[case::yaml_off_uppercase("OFF", false)]
+#[case::yaml_n_lowercase("n", false)]
+#[case::yaml_n_uppercase("N", false)]
+fn test_handle_bool_happy_path(
+    #[case] arg: &str,
+    #[case] expected: bool,
+    #[values("", "!!bool ")] tag: &str,
+) -> Result<()> {
+    let docs = format!("check: {tag}{arg}");
+
     let mut loader = Loader::new();
-    let value = loader.load(format!("check: {arg}"))?;
+    match loader.load(String::from(docs))? {
+        MarkedValue::Map(map, ..) => {
+            assert!(map.len() == 1);
+            let (.., result) = map.first().unwrap();
 
-    let map = match &value {
-        MarkedValue::Map(m, ..) => m,
-        _ => unreachable!("a single mapping loads as a map"),
-    };
-    assert_eq!(1, map.len());
-    let (.., loaded) = map.first().unwrap();
+            match *result {
+                MarkedValue::Bool(result, ..) => assert_eq!(result, expected),
+                ref other => panic!(
+                    "expected `{}{}` to load as a bool, got {:?}",
+                    tag, arg, other
+                ),
+            }
+        }
+        _ => unreachable!("this isn't possible"),
+    }
 
-    assert!(
-        matches!(loaded, MarkedValue::Bool(b, ..) if *b == expected),
-        "{} loaded as {:?}, not the boolean {}",
-        arg,
-        loaded,
-        expected
-    );
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case::mixed_case("tRUE")]
+#[case::not_a_bool("maybe")]
+#[case::a_number("1")]
+fn test_handle_bool_invalid_spelling_with_tag_loads_as_string(#[case] arg: &str) -> Result<()> {
+    let docs = format!("check: !!bool {arg}");
+
+    let mut loader = Loader::new();
+    match loader.load(docs)? {
+        MarkedValue::Map(map, ..) => {
+            let (.., result) = map.first().unwrap();
+            match result {
+                MarkedValue::String(result, ..) => assert_eq!(result, arg),
+                other => panic!("expected `{}` to load as a string, got {:?}", arg, other),
+            }
+        }
+        _ => unreachable!("this isn't possible"),
+    }
 
     Ok(())
 }
@@ -1520,7 +1557,7 @@ fn an_alias_does_not_raise_the_ceiling_it_is_held_to() {
     );
 }
 
-/// A `!!int`, `!!float` or `!!bool` whose payload is not one is a refused key and a refused merge
+/// A `!!int` or `!!float` whose payload is not one is a refused key and a refused merge
 /// source for the reasons those shapes always had, under both loaders.
 ///
 /// The spec loader marks a node it refuses, and the refusal's message is forwarded when such a node
@@ -2050,24 +2087,6 @@ fn comments_around_a_real_document_are_still_skipped() -> Result<()> {
 #[case::a_single_letter_outside_the_set("t")]
 #[case::a_word_that_starts_with_one("TRUE_VALUE")]
 #[case::a_word_that_ends_with_one("NOT_TRUE")]
-// The YAML 1.1-only spellings, which the loader reads as strings. Read as booleans, `AttributeType: N`
-// would become `false` and `on:` in a GitHub Actions workflow a key no mapping can hold.
-#[case::yaml_1_1_yes("yes")]
-#[case::yaml_1_1_yes_capitalized("Yes")]
-#[case::yaml_1_1_yes_uppercase("YES")]
-#[case::yaml_1_1_no("no")]
-#[case::yaml_1_1_no_capitalized("No")]
-#[case::yaml_1_1_no_uppercase("NO")]
-#[case::yaml_1_1_on("on")]
-#[case::yaml_1_1_on_capitalized("On")]
-#[case::yaml_1_1_on_uppercase("ON")]
-#[case::yaml_1_1_off("off")]
-#[case::yaml_1_1_off_capitalized("Off")]
-#[case::yaml_1_1_off_uppercase("OFF")]
-#[case::yaml_1_1_y("y")]
-#[case::yaml_1_1_y_uppercase("Y")]
-#[case::yaml_1_1_n("n")]
-#[case::yaml_1_1_n_uppercase("N")]
 fn a_scalar_outside_the_boolean_set_is_still_a_string(#[case] scalar: &str) -> Result<()> {
     let mut loader = Loader::new();
     let value = loader.load(format!("check: {scalar}"))?;
@@ -2117,46 +2136,6 @@ fn an_explicitly_tagged_bool_reads_the_same_set_as_a_plain_one(
         scalar,
         loaded,
         expected
-    );
-
-    Ok(())
-}
-
-/// A payload outside the boolean set under an explicit `!!bool` is refused, not turned into a string.
-///
-/// Narrowing `parse_bool` to the YAML 1.2 core set made the `!!bool` arm's fallback reachable, and it
-/// returned a *string*: `!!bool yes` became "yes", which neither reads the node as the boolean the
-/// author asked for nor says it could not be read as one. `!!int abc` two arms below is a loud
-/// `BadValue`, so one out-of-set payload under an explicit type tag was a hard error and the other a
-/// silent type change.
-///
-/// `serde_yaml` refuses every one of these outright, so refusing here closes a divergence rather than
-/// opening one. Measured against it payload by payload, including `tRuE`, which neither accepts.
-#[rstest::rstest]
-#[case::a_yaml_1_1_word("yes")]
-#[case::a_yaml_1_1_letter("y")]
-#[case::a_yaml_1_1_switch("off")]
-#[case::mixed_case("tRuE")]
-#[case::a_number("1")]
-#[case::not_a_boolean_at_all("maybe")]
-fn a_bool_tag_over_something_outside_the_set_is_refused(#[case] scalar: &str) -> Result<()> {
-    let value = Loader::new().load(format!("check: !!bool {scalar}"))?;
-
-    let map = match &value {
-        MarkedValue::Map(m, ..) => m,
-        _ => unreachable!("a single mapping loads as a map"),
-    };
-    let (.., loaded) = map.first().unwrap();
-
-    // The refusal carries the node as written, tag included, so the report says what made the
-    // payload unreadable: "Value = maybe" did not, "Value = !!bool maybe" does.
-    let written = format!("!!bool {scalar}");
-    assert!(
-        matches!(loaded, MarkedValue::BadValue(v, ..) if *v == written),
-        "!!bool {} loaded as {:?}, not a BadValue holding {:?}",
-        scalar,
-        loaded,
-        written
     );
 
     Ok(())
@@ -4907,8 +4886,8 @@ fn an_explicitly_tagged_float_is_gated_like_a_plain_one(
 /// This arm returned `Null` without reading its payload, so `IsLogging: !!null false` was a null and
 /// the `false` was gone, with no diagnostic and no way to recover the author's text from any output:
 /// a rule `IsLogging == false` reported "not comparable null, bool" where the untagged `false`
-/// compared. The sibling arms each read their payload and answer `BadValue` on a miss -- `!!bool abc`
-/// and `!!int abc` are both refused -- and this was the one tag that accepted anything.
+/// compared. The sibling arms each read their payload and answer `BadValue` on a miss -- `!!int abc`
+/// is refused -- and this was the one tag that accepted anything.
 ///
 /// The set is `null | Null | NULL | ~` and the empty scalar, by exact spelling, which is what the
 /// core schema resolves (<https://yaml.org/spec/1.2.2/#103-core-schema>). A quoted payload in the set
@@ -5331,7 +5310,7 @@ fn a_spec_loader_marks_a_type_tagged_root_container() {
 /// key said explicitly, and it is the one spelling that makes a *quoted* `<<` a merge key. The merge
 /// index was decided on `tag.is_none()`, so `!!merge <<` fell through as an ordinary key named `<<`
 /// and everything under it was hidden. `!!merge` over any other text names a type the payload cannot
-/// be, as `!!bool maybe` does, and is refused the same way.
+/// be, as `!!int maybe` does, and is refused the same way.
 #[rstest::rstest]
 #[case::plain("!!merge <<: { a: merged }")]
 #[case::quoted("!!merge \"<<\": { a: merged }")]
